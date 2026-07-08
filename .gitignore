@@ -1,0 +1,19 @@
+# Only the Home Assistant integration is published. Everything else — research,
+# protocol notes, methodology, tooling, tests, captures — stays local and is
+# never committed.
+#
+# This is a WHITELIST: everything is ignored by default, so any NEW file stays
+# local automatically. To publish a new file, add an explicit allow-rule (!/path).
+
+/*
+
+!/.gitignore
+!/README.md
+!/LICENSE
+!/hacs.json
+!/custom_components/
+
+# never track caches, even inside the integration
+custom_components/**/__pycache__/
+*.py[cod]
+.DS_Store

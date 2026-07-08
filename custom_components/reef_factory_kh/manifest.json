@@ -1,0 +1,13 @@
+{
+  "domain": "reef_factory_kh",
+  "name": "Reef Factory KH Keeper",
+  "version": "0.4.0",
+  "codeowners": ["@Benmtturner"],
+  "config_flow": true,
+  "documentation": "https://github.com/Benmtturner/Reef-Factory-HA",
+  "issue_tracker": "https://github.com/Benmtturner/Reef-Factory-HA/issues",
+  "iot_class": "local_push",
+  "integration_type": "device",
+  "requirements": [],
+  "dependencies": []
+}

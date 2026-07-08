@@ -1,0 +1,314 @@
+"""WebSocket connection manager for the Reef Factory KH Keeper.
+
+Push-based (`local_push`): a background task holds a LAN WebSocket open, runs the
+device handshake, joins the KH stream, and feeds decoded state into a
+DataUpdateCoordinator. Entities update via the coordinator; there is no polling.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import replace
+
+import aiohttp
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
+
+from homeassistant.components import network
+
+from .const import (
+    CONF_FIRMWARE,
+    CONF_LOG_FRAMES,
+    CONF_SERIAL,
+    CONNECT_TIMEOUT,
+    DEVICE_FAMILY,
+    DOMAIN,
+    PING_INTERVAL,
+    RECONNECT_MAX,
+    RECONNECT_MIN,
+    SCAN_CONCURRENCY,
+    SCAN_TIMEOUT,
+    WS_PATH,
+    WS_SUBPROTOCOL,
+)
+from .protocol import (
+    ZERO_SERIAL,
+    DeviceConfig,
+    KhState,
+    build_frame,
+    decode_config,
+    decode_settings,
+    decode_status,
+    encode_reagent,
+    parse_frame,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _describe(frame) -> str:
+    """Best-effort one-line decode of a frame for the diagnostic log."""
+    p = frame.payload
+    try:
+        if frame.command == "khRefresh":
+            if frame.subcommand == "pH" and len(p) >= 4:
+                return f"pH={int.from_bytes(p[0:4], 'big') / 10000:.2f}"
+            if frame.subcommand == "status" and len(p) >= 2:
+                return f"state={p[0]} progress={p[1]}%"
+            if frame.subcommand in ("calibration", "circuit") and len(p) >= 2:
+                return f"countdown={p[0]} circuit={p[1]}"
+            if frame.subcommand == "settings" and len(p) >= 17:
+                return (
+                    f"interval={p[10]} reagent_alert={p[15]} records={p[16]} "
+                    f"hdr0={int.from_bytes(p[0:4], 'big') / 10000} "
+                    f"hdr4={int.from_bytes(p[4:8], 'big') / 10000}"
+                )
+    except (IndexError, ValueError):
+        pass
+    return ""
+
+
+async def async_probe(hass: HomeAssistant, host: str) -> DeviceConfig:
+    """Briefly connect to a device and return its serial + firmware.
+
+    Used by the config flow. Raises on any connection problem.
+    """
+    session = async_get_clientsession(hass)
+    url = f"ws://{host}/{WS_PATH}"
+
+    async with asyncio.timeout(CONNECT_TIMEOUT):
+        async with session.ws_connect(url, protocols=[WS_SUBPROTOCOL]) as ws:
+            await ws.send_bytes(build_frame(ZERO_SERIAL, "get", "config"))
+            async for msg in ws:
+                if msg.type is not aiohttp.WSMsgType.BINARY:
+                    continue
+                frame = parse_frame(msg.data)
+                if frame.command == "refresh" and frame.subcommand == "config":
+                    return decode_config(frame.payload)
+
+    raise ConnectionError("no config response from device")
+
+
+async def _probe_quiet(
+    session: aiohttp.ClientSession, ip: str, timeout: float
+) -> DeviceConfig | None:
+    """Probe one host, returning its config or None (never raises)."""
+    url = f"ws://{ip}/{WS_PATH}"
+    try:
+        async with asyncio.timeout(timeout):
+            async with session.ws_connect(url, protocols=[WS_SUBPROTOCOL]) as ws:
+                await ws.send_bytes(build_frame(ZERO_SERIAL, "get", "config"))
+                async for msg in ws:
+                    if msg.type is aiohttp.WSMsgType.BINARY:
+                        frame = parse_frame(msg.data)
+                        if frame.command == "refresh" and frame.subcommand == "config":
+                            return decode_config(frame.payload)
+    except (aiohttp.ClientError, OSError, asyncio.TimeoutError, ConnectionError):
+        return None
+    return None
+
+
+async def async_scan(hass: HomeAssistant) -> dict[str, DeviceConfig]:
+    """Scan the Home Assistant host's /24 for KH Keepers.
+
+    Returns {ip: DeviceConfig} for every device whose serial starts with RFKH.
+    """
+    try:
+        local_ip = await network.async_get_source_ip(hass, target_ip="8.8.8.8")
+    except (RuntimeError, OSError):
+        return {}
+
+    if not local_ip or local_ip.count(".") != 3:
+        return {}
+
+    base = local_ip.rsplit(".", 1)[0]
+    session = async_get_clientsession(hass)
+    semaphore = asyncio.Semaphore(SCAN_CONCURRENCY)
+    found: dict[str, DeviceConfig] = {}
+
+    async def _scan_one(host: str) -> None:
+        async with semaphore:
+            config = await _probe_quiet(session, host, SCAN_TIMEOUT)
+        if config and config.serial.upper().startswith(DEVICE_FAMILY):
+            found[host] = config
+
+    await asyncio.gather(*(_scan_one(f"{base}.{i}") for i in range(1, 255)))
+    return found
+
+
+class KhCoordinator(DataUpdateCoordinator[KhState]):
+    """Owns the persistent WebSocket connection to one KH Keeper."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        super().__init__(hass, _LOGGER, name=DOMAIN)
+        self.entry = entry
+        self.host: str = entry.data["host"]
+        self.serial: str | None = entry.data.get(CONF_SERIAL)
+        self.firmware: str = entry.data.get(CONF_FIRMWARE, "0.0.0")
+
+        self._session = async_get_clientsession(hass)
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._task: asyncio.Task | None = None
+        self._closing = False
+        self._retry = 0
+        self._last_logged: dict[tuple[str, str], bytes] = {}
+
+    async def async_start(self) -> None:
+        """Launch the background connection loop."""
+        self._closing = False
+        self._task = self.entry.async_create_background_task(
+            self.hass, self._runner(), name=f"{DOMAIN}_{self.host}"
+        )
+
+    async def async_stop(self) -> None:
+        """Stop the connection loop and close the socket."""
+        self._closing = True
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
+        if self._task and not self._task.done():
+            self._task.cancel()
+
+    # ------------------------------------------------------------------
+    # Commands (device writes)
+    # ------------------------------------------------------------------
+
+    async def async_send(
+        self, command: str, subcommand: str, payload: bytes = b""
+    ) -> None:
+        """Send a command frame to the device over the LAN WebSocket."""
+        ws = self._ws
+        if ws is None or ws.closed or not self.serial:
+            raise HomeAssistantError(f"KH Keeper {self.host} is not connected")
+
+        _LOGGER.debug("TX %s/%s payload=%s", command, subcommand, payload.hex())
+        await ws.send_bytes(
+            build_frame(self.serial, command, subcommand, payload=payload)
+        )
+
+    async def async_set_reagent(self, ml: float) -> None:
+        """Set the remaining reagent level (mL). Benign — updates a tracked value."""
+        await self.async_send("khSet", "reagent", encode_reagent(ml))
+
+    async def async_measure_now(self) -> None:
+        """Start a measurement now (runs a full titration cycle)."""
+        await self.async_send("khMeasurement", "takeNow")
+
+    async def async_cancel_measurement(self) -> None:
+        """Cancel the measurement in progress."""
+        await self.async_send("khMeasurement", "cancel")
+
+    async def _runner(self) -> None:
+        """Reconnect loop with progressive back-off."""
+        while not self._closing:
+            try:
+                await self._connect_and_listen()
+            except asyncio.CancelledError:
+                raise
+            except (aiohttp.ClientError, OSError, asyncio.TimeoutError, ConnectionError) as err:
+                self.async_set_update_error(UpdateFailed(str(err)))
+                _LOGGER.debug("KH Keeper %s connection error: %s", self.host, err)
+            except Exception as err:  # noqa: BLE001 — keep the loop alive
+                self.async_set_update_error(UpdateFailed(str(err)))
+                _LOGGER.exception("Unexpected KH Keeper error for %s", self.host)
+
+            if self._closing:
+                break
+
+            delay = min(RECONNECT_MIN * (self._retry + 1), RECONNECT_MAX)
+            self._retry += 1
+            await asyncio.sleep(delay)
+
+    async def _connect_and_listen(self) -> None:
+        """One connection lifecycle: handshake, join, then listen with keepalive."""
+        url = f"ws://{self.host}/{WS_PATH}"
+        async with asyncio.timeout(CONNECT_TIMEOUT):
+            ws = await self._session.ws_connect(url, protocols=[WS_SUBPROTOCOL])
+
+        self._ws = ws
+        self._retry = 0
+        try:
+            await ws.send_bytes(build_frame(ZERO_SERIAL, "get", "config"))
+
+            while not self._closing:
+                try:
+                    msg = await ws.receive(timeout=PING_INTERVAL)
+                except asyncio.TimeoutError:
+                    # Idle — send an app-level ping to keep the socket alive.
+                    await ws.send_bytes(build_frame(self.serial or ZERO_SERIAL, "ping", "ping"))
+                    continue
+
+                if msg.type is aiohttp.WSMsgType.BINARY:
+                    await self._handle(ws, msg.data)
+                elif msg.type in (
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSING,
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.ERROR,
+                ):
+                    break
+        finally:
+            self._ws = None
+            if not ws.closed:
+                await ws.close()
+
+    def _sniff(self, frame) -> None:
+        """Diagnostic: log every distinct frame at WARNING (readable in the HA log).
+
+        De-duplicates by (command, subcommand) payload so a repeated identical
+        settings push is not logged, but changes (a setting edit) and every
+        measurement-in-progress frame (status/pH/calibration) are.
+        """
+        key = (frame.command, frame.subcommand)
+        if self._last_logged.get(key) == frame.payload:
+            return
+        self._last_logged[key] = frame.payload
+        _LOGGER.warning(
+            "REEF-KH SNIFF %s/%s %dB: %s | %s",
+            frame.command,
+            frame.subcommand,
+            len(frame.payload),
+            frame.payload.hex(),
+            _describe(frame),
+        )
+
+    async def _handle(self, ws: aiohttp.ClientWebSocketResponse, data: bytes) -> None:
+        """Dispatch one incoming frame."""
+        frame = parse_frame(data)
+
+        if self.entry.options.get(CONF_LOG_FRAMES):
+            self._sniff(frame)
+
+        if frame.command == "refresh" and frame.subcommand == "config":
+            config = decode_config(frame.payload)
+            self.serial = config.serial
+            self.firmware = config.firmware
+            _LOGGER.debug("KH Keeper %s: serial=%s fw=%s", self.host, config.serial, config.firmware)
+            join = build_frame(
+                config.serial, "khConnect", "join",
+                payload=config.serial.encode("ascii") + b"\x00",
+            )
+            await ws.send_bytes(join)
+        elif frame.command == "khRefresh" and frame.subcommand == "settings":
+            try:
+                state = decode_settings(frame.payload, tz=dt_util.DEFAULT_TIME_ZONE)
+            except (ValueError, IndexError) as err:
+                _LOGGER.warning("Bad settings frame from %s: %s", self.host, err)
+                return
+            self.async_set_updated_data(state)
+        elif frame.command == "khRefresh" and frame.subcommand == "status":
+            # Live measurement progress. Patch the current state if we have one.
+            if self.data is not None:
+                state_code, progress = decode_status(frame.payload)
+                self.async_set_updated_data(
+                    replace(
+                        self.data,
+                        measurement_state=state_code,
+                        measurement_progress=progress,
+                    )
+                )
+        # pH/server/alert/calibration frames carry no entity data yet; ignored.
