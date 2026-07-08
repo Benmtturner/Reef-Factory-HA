@@ -36,6 +36,9 @@ DEVICE_FAMILY = "RFKH"
 
 CONF_SERIAL = "serial_number"
 CONF_FIRMWARE = "firmware_version"
+CONF_MAC = "mac"
+
+PONG_TIMEOUT = 10  # seconds — drop the connection if a ping gets no response
 
 # Options
 CONF_LOG_FRAMES = "log_frames"  # diagnostic: log every distinct frame to the HA log

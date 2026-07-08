@@ -19,10 +19,13 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import callback
+from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .const import (
     CONF_FIRMWARE,
     CONF_LOG_FRAMES,
+    CONF_MAC,
     CONF_SERIAL,
     DEVICE_FAMILY,
     DOMAIN,
@@ -56,6 +59,20 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         """Return the options flow."""
         return KhOptionsFlow()
+
+    async def async_step_dhcp(
+        self, discovery_info: DhcpServiceInfo
+    ) -> ConfigFlowResult:
+        """A registered device got a DHCP lease — relocate ours if its IP changed."""
+        mac = format_mac(discovery_info.macaddress)
+        for entry in self._async_current_entries():
+            if entry.data.get(CONF_MAC) == mac:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={**entry.data, CONF_HOST: discovery_info.ip},
+                    reason="already_configured",
+                )
+        return self.async_abort(reason="not_ours")
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

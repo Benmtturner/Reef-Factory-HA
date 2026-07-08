@@ -38,8 +38,11 @@ Settings → Devices & Services → Add Integration → *Reef Factory KH Keeper*
 
 The integration scans your Home Assistant host's network and offers any KH Keepers it finds
 — just pick yours, no IP typing. If none are found (e.g. the device is on a separate VLAN),
-it falls back to manual IP entry. Reserving a static IP for the device in your router is
-recommended.
+it falls back to manual IP entry.
+
+**A static IP is not required.** If the device reboots and DHCP gives it a new address, the
+integration relearns it automatically — by MAC via Home Assistant's discovery, and by a
+network rescan for the device's serial as a fallback.
 
 ## Example automation — alert on a KH excursion
 

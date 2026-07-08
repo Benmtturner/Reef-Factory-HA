@@ -13,22 +13,31 @@ from dataclasses import replace
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from homeassistant.components import network
 
+try:
+    from getmac import get_mac_address
+except ImportError:  # getmac ships with HA's dhcp component; degrade gracefully
+    get_mac_address = None
+
 from .const import (
     CONF_FIRMWARE,
     CONF_LOG_FRAMES,
+    CONF_MAC,
     CONF_SERIAL,
     CONNECT_TIMEOUT,
     DEVICE_FAMILY,
     DOMAIN,
     PING_INTERVAL,
+    PONG_TIMEOUT,
     RECONNECT_MAX,
     RECONNECT_MIN,
     SCAN_CONCURRENCY,
@@ -150,6 +159,7 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
         self.host: str = entry.data["host"]
         self.serial: str | None = entry.data.get(CONF_SERIAL)
         self.firmware: str = entry.data.get(CONF_FIRMWARE, "0.0.0")
+        self.mac: str | None = entry.data.get(CONF_MAC)
 
         self._session = async_get_clientsession(hass)
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -202,8 +212,65 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
         """Cancel the measurement in progress."""
         await self.async_send("khMeasurement", "cancel")
 
+    def _persist(self, key: str, value: str) -> None:
+        """Persist a value into the config entry (survives restarts)."""
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, key: value}
+        )
+
+    async def _learn_mac(self) -> None:
+        """Learn the device MAC once we're connected, for DHCP-based IP recovery.
+
+        Run only after a confirmed connection (so `host` is the device's real
+        current IP), then register it so Home Assistant's DHCP tracker can
+        relocate the device by MAC. Best-effort — a missing MAC just falls back
+        to the serial rescan.
+        """
+        if self.mac or get_mac_address is None:
+            return
+        try:
+            raw = await self.hass.async_add_executor_job(
+                lambda: get_mac_address(ip=self.host)
+            )
+        except Exception:  # noqa: BLE001 — best effort
+            return
+        if not raw:
+            return
+
+        self.mac = dr.format_mac(raw)
+        self._persist(CONF_MAC, self.mac)
+        _LOGGER.debug("KH Keeper %s MAC %s", self.serial, self.mac)
+
+        # Entities registered before the MAC was known — add the connection now.
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device(
+            identifiers={(DOMAIN, self.serial or self.host)}
+        )
+        if device:
+            registry.async_update_device(
+                device.id,
+                merge_connections={(dr.CONNECTION_NETWORK_MAC, self.mac)},
+            )
+
+    async def _rediscover(self) -> None:
+        """Find our device on the subnet by serial and adopt a new IP if it moved."""
+        if not self.serial:
+            return
+        try:
+            found = await async_scan(self.hass)
+        except Exception:  # noqa: BLE001 — best effort
+            return
+        for ip, config in found.items():
+            if config.serial == self.serial and ip != self.host:
+                _LOGGER.info(
+                    "KH Keeper %s moved: %s -> %s", self.serial, self.host, ip
+                )
+                self.host = ip
+                self._persist(CONF_HOST, ip)
+                return
+
     async def _runner(self) -> None:
-        """Reconnect loop with progressive back-off."""
+        """Reconnect loop with progressive back-off and IP recovery."""
         while not self._closing:
             try:
                 await self._connect_and_listen()
@@ -212,6 +279,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
             except (aiohttp.ClientError, OSError, asyncio.TimeoutError, ConnectionError) as err:
                 self.async_set_update_error(UpdateFailed(str(err)))
                 _LOGGER.debug("KH Keeper %s connection error: %s", self.host, err)
+                # Device may have rebooted onto a new DHCP address — relocate it.
+                await self._rediscover()
             except Exception as err:  # noqa: BLE001 — keep the loop alive
                 self.async_set_update_error(UpdateFailed(str(err)))
                 _LOGGER.exception("Unexpected KH Keeper error for %s", self.host)
@@ -231,6 +300,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
 
         self._ws = ws
         self._retry = 0
+        if not self.mac:
+            self.hass.async_create_task(self._learn_mac())
         try:
             await ws.send_bytes(build_frame(ZERO_SERIAL, "get", "config"))
 
@@ -238,9 +309,15 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
                 try:
                     msg = await ws.receive(timeout=PING_INTERVAL)
                 except asyncio.TimeoutError:
-                    # Idle — send an app-level ping to keep the socket alive.
-                    await ws.send_bytes(build_frame(self.serial or ZERO_SERIAL, "ping", "ping"))
-                    continue
+                    # Idle — ping and require a response, or the link is dead.
+                    await ws.send_bytes(
+                        build_frame(self.serial or ZERO_SERIAL, "ping", "ping")
+                    )
+                    try:
+                        msg = await ws.receive(timeout=PONG_TIMEOUT)
+                    except asyncio.TimeoutError as err:
+                        # Half-open socket (e.g. device rebooted / changed IP).
+                        raise ConnectionError("no response to ping") from err
 
                 if msg.type is aiohttp.WSMsgType.BINARY:
                     await self._handle(ws, msg.data)
@@ -250,7 +327,7 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
                     aiohttp.WSMsgType.CLOSED,
                     aiohttp.WSMsgType.ERROR,
                 ):
-                    break
+                    raise ConnectionError(f"socket closed ({msg.type.name})")
         finally:
             self._ws = None
             if not ws.closed:

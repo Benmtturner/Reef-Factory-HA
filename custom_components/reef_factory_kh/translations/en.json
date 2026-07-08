@@ -22,7 +22,8 @@
       "not_kh": "That device responded but is not a KH Keeper (serial does not start with RFKH)."
     },
     "abort": {
-      "already_configured": "This KH Keeper is already configured."
+      "already_configured": "This KH Keeper is already configured.",
+      "not_ours": "Discovered device is not a configured KH Keeper."
     }
   },
   "options": {
