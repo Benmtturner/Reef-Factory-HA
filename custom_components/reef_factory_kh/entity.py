@@ -8,7 +8,7 @@ from homeassistant.helpers.device_registry import (
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MANUFACTURER, MODEL
+from .const import DOMAIN, MANUFACTURER
 from .coordinator import KhCoordinator
 
 
@@ -28,7 +28,7 @@ class KhEntity(CoordinatorEntity[KhCoordinator]):
             ),
             name=coordinator.entry.title,
             manufacturer=MANUFACTURER,
-            model=MODEL,
+            model=coordinator.model,
             serial_number=coordinator.serial,
             sw_version=coordinator.firmware,
             configuration_url=f"http://{coordinator.host}/",

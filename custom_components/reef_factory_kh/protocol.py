@@ -225,3 +225,84 @@ def encode_reagent(ml: float) -> bytes:
     max_ml = 0xFFFFFFFF // SCALE
     value = max(0, min(max_ml, int(round(ml))))
     return (value * SCALE).to_bytes(4, "big")
+
+
+# ---------------------------------------------------------------------------
+# Single-head doser (RFDP) — binary, scale ÷100 (NOT the KH ÷10000).
+# Field offsets in dpRefresh/settings confirmed by live change-diff against the
+# 360 Smart Reef app; see DP_PROTOCOL.md. Frame tail past ~0x30 is leaked RAM.
+# ---------------------------------------------------------------------------
+
+DP_SCALE = 100
+
+_DP_OFF_CONTAINER = 0x00     # container level, u32
+_DP_OFF_CAPACITY = 0x04      # container capacity, u32
+_DP_OFF_DAILY_TOTAL = 0x16   # "Liquid amount" — total dosed per day, u32
+_DP_OFF_DOSE_COUNT = 0x24    # number of doses per day, u8
+_DP_OFF_PER_DOSE = 0x25      # per-dose value, u32
+_DP_SETTINGS_MIN = 0x29      # need byte 0x28 for the per-dose u32
+_DP_STATUS_STATE = 8         # status state byte: 2 = dosing (tentative)
+_DP_STATE_DOSING = 2
+
+
+@dataclass(frozen=True)
+class DpState:
+    """Decoded single-head doser state from a dpRefresh/settings frame.
+
+    ``dosing``/``last_dose_ml``/``last_dose_at`` are not in the settings frame;
+    the coordinator patches them from status/dose frames.
+    """
+
+    container_ml: float | None
+    capacity_ml: float | None
+    daily_total_ml: float | None
+    dose_count: int
+    per_dose_ml: float | None
+    dosing: bool = False
+    last_dose_ml: float | None = None
+    last_dose_at: datetime | None = None
+
+    @property
+    def reservoir_pct(self) -> float | None:
+        """Container fill as a percentage of capacity."""
+        if self.container_ml is None or not self.capacity_ml:
+            return None
+        return round(100 * self.container_ml / self.capacity_ml, 1)
+
+
+def decode_dp_settings(payload: bytes) -> DpState:
+    """Decode a dpRefresh/settings frame's structured head (rest is RAM leak)."""
+    if len(payload) < _DP_SETTINGS_MIN:
+        raise ValueError(f"dp settings frame too short: {len(payload)} bytes")
+    return DpState(
+        container_ml=round(_u32(payload, _DP_OFF_CONTAINER) / DP_SCALE, 2),
+        capacity_ml=round(_u32(payload, _DP_OFF_CAPACITY) / DP_SCALE, 2),
+        daily_total_ml=round(_u32(payload, _DP_OFF_DAILY_TOTAL) / DP_SCALE, 2),
+        dose_count=payload[_DP_OFF_DOSE_COUNT],
+        per_dose_ml=round(_u32(payload, _DP_OFF_PER_DOSE) / DP_SCALE, 2),
+    )
+
+
+def decode_dp_status(payload: bytes) -> tuple[float | None, bool]:
+    """Decode a dpRefresh/status frame into (live container mL, dosing?)."""
+    level = round(_u32(payload, 0) / DP_SCALE, 2) if len(payload) >= 4 else None
+    dosing = (
+        len(payload) > _DP_STATUS_STATE and payload[_DP_STATUS_STATE] == _DP_STATE_DOSING
+    )
+    return level, dosing
+
+
+def decode_dp_dose(payload: bytes) -> float | None:
+    """Decode a dpRefresh/dose frame (4 B): the volume just dispensed, mL."""
+    if len(payload) < 4:
+        return None
+    return round(_u32(payload, 0) / DP_SCALE, 2)
+
+
+def detect_family(serial: str) -> str | None:
+    """Return the device-family prefix (RFKH/RFDP) for a serial, or None."""
+    upper = serial.upper()
+    for family in ("RFKH", "RFDP"):
+        if upper.startswith(family):
+            return family
+    return None

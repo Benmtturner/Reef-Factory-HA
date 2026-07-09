@@ -1,7 +1,7 @@
 {
   "domain": "reef_factory_kh",
-  "name": "Reef Factory KH Keeper",
-  "version": "0.5.0",
+  "name": "Reef Factory",
+  "version": "0.6.0",
   "codeowners": ["@Benmtturner"],
   "config_flow": true,
   "dhcp": [

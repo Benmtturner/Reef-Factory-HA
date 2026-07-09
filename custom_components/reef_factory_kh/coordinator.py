@@ -29,30 +29,39 @@ except ImportError:  # getmac ships with HA's dhcp component; degrade gracefully
     get_mac_address = None
 
 from .const import (
+    CONF_FAMILY,
     CONF_FIRMWARE,
     CONF_LOG_FRAMES,
     CONF_MAC,
     CONF_SERIAL,
     CONNECT_TIMEOUT,
-    DEVICE_FAMILY,
     DOMAIN,
+    FAMILY_DP,
+    FAMILY_KH,
+    MODELS,
     PING_INTERVAL,
     PONG_TIMEOUT,
     RECONNECT_MAX,
     RECONNECT_MIN,
     SCAN_CONCURRENCY,
     SCAN_TIMEOUT,
+    SUPPORTED_FAMILIES,
     WS_PATH,
     WS_SUBPROTOCOL,
 )
 from .protocol import (
     ZERO_SERIAL,
     DeviceConfig,
+    DpState,
     KhState,
     build_frame,
     decode_config,
+    decode_dp_dose,
+    decode_dp_settings,
+    decode_dp_status,
     decode_settings,
     decode_status,
+    detect_family,
     encode_reagent,
     parse_frame,
 )
@@ -123,9 +132,10 @@ async def _probe_quiet(
 
 
 async def async_scan(hass: HomeAssistant) -> dict[str, DeviceConfig]:
-    """Scan the Home Assistant host's /24 for KH Keepers.
+    """Scan the Home Assistant host's /24 for supported Reef Factory devices.
 
-    Returns {ip: DeviceConfig} for every device whose serial starts with RFKH.
+    Returns {ip: DeviceConfig} for every device whose serial starts with a
+    supported family prefix (RFKH / RFDP).
     """
     try:
         local_ip = await network.async_get_source_ip(hass, target_ip="8.8.8.8")
@@ -143,15 +153,19 @@ async def async_scan(hass: HomeAssistant) -> dict[str, DeviceConfig]:
     async def _scan_one(host: str) -> None:
         async with semaphore:
             config = await _probe_quiet(session, host, SCAN_TIMEOUT)
-        if config and config.serial.upper().startswith(DEVICE_FAMILY):
+        if config and config.serial.upper().startswith(SUPPORTED_FAMILIES):
             found[host] = config
 
     await asyncio.gather(*(_scan_one(f"{base}.{i}") for i in range(1, 255)))
     return found
 
 
-class KhCoordinator(DataUpdateCoordinator[KhState]):
-    """Owns the persistent WebSocket connection to one KH Keeper."""
+class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
+    """Owns the persistent WebSocket connection to one Reef Factory device.
+
+    Handles multiple device families (KH Keeper, doser) over the same wire
+    protocol; ``self.family`` selects the join sequence and frame decoders.
+    """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN)
@@ -160,6 +174,12 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
         self.serial: str | None = entry.data.get(CONF_SERIAL)
         self.firmware: str = entry.data.get(CONF_FIRMWARE, "0.0.0")
         self.mac: str | None = entry.data.get(CONF_MAC)
+        # Existing (pre-merge) KH entries have no stored family — detect it.
+        self.family: str = (
+            entry.data.get(CONF_FAMILY)
+            or detect_family(self.serial or "")
+            or FAMILY_KH
+        )
 
         self._session = async_get_clientsession(hass)
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -167,6 +187,17 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
         self._closing = False
         self._retry = 0
         self._last_logged: dict[tuple[str, str], bytes] = {}
+
+        # Doser-only runtime state (not in the settings frame), carried across
+        # settings refreshes and patched from status/dose frames.
+        self._dp_dosing = False
+        self._dp_last_dose_ml: float | None = None
+        self._dp_last_dose_at = None
+
+    @property
+    def model(self) -> str:
+        """Human-readable device model for the family."""
+        return MODELS.get(self.family, MODELS[FAMILY_KH])
 
     async def async_start(self) -> None:
         """Launch the background connection loop."""
@@ -354,7 +385,7 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
         )
 
     async def _handle(self, ws: aiohttp.ClientWebSocketResponse, data: bytes) -> None:
-        """Dispatch one incoming frame."""
+        """Dispatch one incoming frame by device family."""
         frame = parse_frame(data)
 
         if self.entry.options.get(CONF_LOG_FRAMES):
@@ -364,13 +395,32 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
             config = decode_config(frame.payload)
             self.serial = config.serial
             self.firmware = config.firmware
-            _LOGGER.debug("KH Keeper %s: serial=%s fw=%s", self.host, config.serial, config.firmware)
-            join = build_frame(
-                config.serial, "khConnect", "join",
-                payload=config.serial.encode("ascii") + b"\x00",
+            _LOGGER.debug(
+                "Reef Factory %s: serial=%s fw=%s family=%s",
+                self.host, config.serial, config.firmware, self.family,
             )
-            await ws.send_bytes(join)
-        elif frame.command == "khRefresh" and frame.subcommand == "settings":
+            await self._join(ws, config.serial)
+            return
+
+        if self.family == FAMILY_DP:
+            self._handle_dp(frame)
+        else:
+            self._handle_kh(frame)
+
+    async def _join(self, ws: aiohttp.ClientWebSocketResponse, serial: str) -> None:
+        """Send the family-specific join, then request full state."""
+        pay = serial.encode("ascii") + b"\x00"
+        if self.family == FAMILY_DP:
+            # Connect topic varies by firmware — send both, then request state.
+            await ws.send_bytes(build_frame(serial, "daConnect", "join", payload=pay))
+            await ws.send_bytes(build_frame(serial, "dpConnect", "join", payload=pay))
+            await ws.send_bytes(build_frame(serial, "dpGet", "all"))
+        else:
+            await ws.send_bytes(build_frame(serial, "khConnect", "join", payload=pay))
+
+    def _handle_kh(self, frame) -> None:
+        """KH Keeper frames: settings (full state) and status (live progress)."""
+        if frame.command == "khRefresh" and frame.subcommand == "settings":
             try:
                 state = decode_settings(frame.payload, tz=dt_util.DEFAULT_TIME_ZONE)
             except (ValueError, IndexError) as err:
@@ -389,3 +439,41 @@ class KhCoordinator(DataUpdateCoordinator[KhState]):
                     )
                 )
         # pH/server/alert/calibration frames carry no entity data yet; ignored.
+
+    def _handle_dp(self, frame) -> None:
+        """Doser frames: settings (level + schedule), status (live), dose."""
+        if frame.command == "dpRefresh" and frame.subcommand == "settings":
+            try:
+                state = decode_dp_settings(frame.payload)
+            except (ValueError, IndexError) as err:
+                _LOGGER.debug("Bad dp settings frame from %s: %s", self.host, err)
+                return
+            self.async_set_updated_data(
+                replace(
+                    state,
+                    dosing=self._dp_dosing,
+                    last_dose_ml=self._dp_last_dose_ml,
+                    last_dose_at=self._dp_last_dose_at,
+                )
+            )
+        elif frame.command == "dpRefresh" and frame.subcommand == "status":
+            level, dosing = decode_dp_status(frame.payload)
+            self._dp_dosing = dosing
+            if self.data is not None:
+                patch: dict = {"dosing": dosing}
+                if level is not None:
+                    patch["container_ml"] = level
+                self.async_set_updated_data(replace(self.data, **patch))
+        elif frame.command == "dpRefresh" and frame.subcommand == "dose":
+            vol = decode_dp_dose(frame.payload)
+            if vol is not None:
+                self._dp_last_dose_ml = vol
+                self._dp_last_dose_at = dt_util.utcnow()
+                if self.data is not None:
+                    self.async_set_updated_data(
+                        replace(
+                            self.data,
+                            last_dose_ml=vol,
+                            last_dose_at=self._dp_last_dose_at,
+                        )
+                    )

@@ -23,16 +23,22 @@ from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .const import (
+    CONF_FAMILY,
     CONF_FIRMWARE,
     CONF_LOG_FRAMES,
     CONF_MAC,
     CONF_SERIAL,
-    DEVICE_FAMILY,
+    MODELS,
     DOMAIN,
-    MODEL,
 )
 from .coordinator import async_probe, async_scan
-from .protocol import DeviceConfig
+from .protocol import DeviceConfig, detect_family
+
+
+def _model_for(serial: str) -> str:
+    """Model name for a serial's family, falling back to a generic label."""
+    family = detect_family(serial)
+    return MODELS.get(family, "Device") if family else "Device"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,7 +111,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
             return self._create_entry(choice, config)
 
         options = {
-            ip: f"{MODEL} {cfg.serial[-4:]} — {ip}"
+            ip: f"{_model_for(cfg.serial)} {cfg.serial[-4:]} — {ip}"
             for ip, cfg in self._discovered.items()
         }
         options[MANUAL] = "Enter IP address manually…"
@@ -129,8 +135,8 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Failed to probe %s", host)
                 errors["base"] = "cannot_connect"
             else:
-                if not config.serial.upper().startswith(DEVICE_FAMILY):
-                    errors["base"] = "not_kh"
+                if detect_family(config.serial) is None:
+                    errors["base"] = "not_supported"
                 else:
                     await self.async_set_unique_id(config.serial)
                     self._abort_if_unique_id_configured()
@@ -146,7 +152,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
         self, host: str, config: DeviceConfig, name: str | None = None
     ) -> ConfigFlowResult:
         """Create the config entry for a confirmed device."""
-        title = name or f"{MODEL} {config.serial[-4:]}"
+        title = name or f"{_model_for(config.serial)} {config.serial[-4:]}"
         return self.async_create_entry(
             title=title,
             data={
@@ -154,6 +160,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_NAME: title,
                 CONF_SERIAL: config.serial,
                 CONF_FIRMWARE: config.firmware,
+                CONF_FAMILY: detect_family(config.serial),
             },
         )
 

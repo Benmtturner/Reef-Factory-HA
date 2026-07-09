@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import KhConfigEntry
+from .const import FAMILY_KH
 from .entity import KhEntity
 
 
@@ -15,8 +16,10 @@ async def async_setup_entry(
     entry: KhConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up KH Keeper buttons."""
+    """Set up KH Keeper buttons (KH family only)."""
     coordinator = entry.runtime_data
+    if coordinator.family != FAMILY_KH:
+        return
     async_add_entities(
         [
             KhMeasureNowButton(coordinator),

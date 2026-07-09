@@ -2,14 +2,14 @@
   "config": {
     "step": {
       "pick": {
-        "title": "Select your KH Keeper",
-        "description": "These Reef Factory KH Keepers were found on your network. Pick one, or choose manual entry.",
+        "title": "Select your device",
+        "description": "These Reef Factory devices were found on your network. Pick one, or choose manual entry.",
         "data": {
           "host": "Device"
         }
       },
       "manual": {
-        "title": "Enter KH Keeper IP",
+        "title": "Enter device IP",
         "description": "No device was found automatically, or you chose manual entry. Enter the LAN IP address. Reserve a static IP for it in your router first.",
         "data": {
           "host": "IP address",
@@ -19,17 +19,17 @@
     },
     "error": {
       "cannot_connect": "Could not reach the device. Check the IP and that it is on the same network.",
-      "not_kh": "That device responded but is not a KH Keeper (serial does not start with RFKH)."
+      "not_supported": "That device responded but is not a supported Reef Factory device (serial does not start with RFKH or RFDP)."
     },
     "abort": {
-      "already_configured": "This KH Keeper is already configured.",
-      "not_ours": "Discovered device is not a configured KH Keeper."
+      "already_configured": "This device is already configured.",
+      "not_ours": "Discovered device is not a configured Reef Factory device."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "KH Keeper options",
+        "title": "Reef Factory options",
         "description": "Logs raw WebSocket frames from the device to the Home Assistant log for troubleshooting. Leave off during normal use.",
         "data": {
           "log_frames": "Diagnostic frame logging"
