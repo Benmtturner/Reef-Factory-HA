@@ -12,6 +12,10 @@
 !/LICENSE
 !/hacs.json
 !/custom_components/
+# publish ONLY the KH integration; other integrations (e.g. in-development
+# dosers) stay local until explicitly allowed here.
+custom_components/*
+!custom_components/reef_factory_kh/
 
 # never track caches, even inside the integration
 custom_components/**/__pycache__/
