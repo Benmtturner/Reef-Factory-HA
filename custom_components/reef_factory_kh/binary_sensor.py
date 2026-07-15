@@ -8,7 +8,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_platform
+from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import KhConfigEntry
@@ -48,6 +48,17 @@ async def async_setup_entry(
                 vol.Optional("period", default=3): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
             },
             "async_service_submit_calibration",
+        )
+        platform.async_register_entity_service(
+            "set_schedule",
+            {
+                vol.Required("number_of_doses"): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
+                vol.Required("daily_total_ml"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                vol.Optional("days"): vol.All(
+                    cv.ensure_list, [vol.In(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])]
+                ),
+            },
+            "async_service_set_schedule",
         )
         return
 
@@ -114,3 +125,19 @@ class DpDosing(KhEntity, BinarySensorEntity):
         self, measured_ml: float, period: int = 3
     ) -> None:
         await self.coordinator.async_dp_calibration_submit(measured_ml, period)
+
+    async def async_service_set_schedule(
+        self, number_of_doses: int, daily_total_ml: float, days: list[str] | None = None
+    ) -> None:
+        """Write an evenly-spaced schedule of ``number_of_doses`` equal doses that
+        sum to ``daily_total_ml``, on the given days (or the current days)."""
+        count = number_of_doses
+        per_dose = round(daily_total_ml / count, 2) if count else 0.0
+        doses = [((i * 1440) // count, per_dose) for i in range(count)]
+        if days:
+            bit = {"Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6}
+            mask = 0x80 | sum(1 << bit[d] for d in days)
+        else:
+            state = self.coordinator.data
+            mask = state.day_mask if state and state.day_mask else 0xFF
+        await self.coordinator.async_dp_write_doses(doses, mask)
