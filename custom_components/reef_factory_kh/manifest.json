@@ -1,8 +1,10 @@
 {
   "domain": "reef_factory_kh",
   "name": "Reef Factory",
-  "version": "0.7.1",
-  "codeowners": ["@Benmtturner"],
+  "version": "0.7.2",
+  "codeowners": [
+    "@Benmtturner"
+  ],
   "config_flow": true,
   "dhcp": [
     {

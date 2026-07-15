@@ -20,13 +20,7 @@ async def async_setup_entry(
     """Set up numbers for whichever device family this entry is."""
     coordinator = entry.runtime_data
     if coordinator.family == FAMILY_DP:
-        async_add_entities(
-            [
-                DpReservoirLevel(coordinator),
-                DpCapacity(coordinator),
-                DpCalibrationMeasured(coordinator),
-            ]
-        )
+        async_add_entities([DpReservoirLevel(coordinator), DpCapacity(coordinator)])
         return
     if coordinator.family != FAMILY_KH:
         return
@@ -102,30 +96,3 @@ class DpCapacity(KhEntity, NumberEntity):
         state = self.coordinator.data
         current = state.container_ml if state and state.container_ml else 0
         await self.coordinator.async_dp_set_container(current, value)
-
-
-class DpCalibrationMeasured(KhEntity, NumberEntity):
-    """Enter the volume measured during a calibration run — setting it submits
-    the calibration (do Fill Circuit → Run Calibration → catch the output first)."""
-
-    _attr_name = "Calibration Measured"
-    _attr_native_unit_of_measurement = UNIT_ML
-    _attr_native_min_value = 0
-    _attr_native_max_value = 100
-    _attr_native_step = 0.01
-    _attr_mode = NumberMode.BOX
-    _attr_icon = "mdi:beaker-plus-outline"
-    _attr_entity_category = EntityCategory.CONFIG
-
-    def __init__(self, coordinator) -> None:
-        super().__init__(coordinator, "calibration_measured")
-        self._value: float | None = None
-
-    @property
-    def native_value(self) -> float | None:
-        return self._value
-
-    async def async_set_native_value(self, value: float) -> None:
-        self._value = value
-        await self.coordinator.async_dp_calibration_submit(value)
-        self.async_write_ha_state()
