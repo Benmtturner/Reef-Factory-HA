@@ -19,6 +19,8 @@ type KhConfigEntry = ConfigEntry[KhCoordinator]
 
 CARD_URL = f"/{DOMAIN}/reef-factory-doser-card.js"
 _CARD_FILE = "frontend/reef-factory-doser-card.js"
+# Bump when the card JS changes so the browser reloads it (?v= cache-buster).
+CARD_VERSION = "0.8.1"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
@@ -32,7 +34,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(CARD_URL, str(card_path), False)]
         )
-        add_extra_js_url(hass, CARD_URL)
+        add_extra_js_url(hass, f"{CARD_URL}?v={CARD_VERSION}")
         _LOGGER.debug("Reef Factory doser card registered at %s", CARD_URL)
     except Exception:  # noqa: BLE001 — a card failure must never break the device
         _LOGGER.warning("Could not register the Reef Factory doser card", exc_info=True)

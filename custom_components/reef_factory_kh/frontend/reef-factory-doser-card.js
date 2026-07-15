@@ -92,45 +92,47 @@ class ReefFactoryDoserCard extends HTMLElement {
     const root = this.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
-        :host { --rf-blue:#3f8fd6; --rf-blue-d:#2f7bc0; --rf-red:#e2574c; --rf-grey:#9aa3ab; --rf-ink:#4a5560; }
-        ha-card { padding:18px; color:var(--rf-ink); font-family:var(--paper-font-body1_-_font-family, sans-serif); }
-        .grid { display:grid; grid-template-columns:1fr auto 1fr; grid-template-areas:"today beaker dosing" "refill beaker calibrate"; gap:14px 20px; align-items:start; }
+        :host { --rf-blue:#3f8fd6; }
+        ha-card { padding:16px; }
+        .grid { display:grid; grid-template-columns:1fr auto 1fr; grid-template-areas:"today beaker dosing" "refill beaker calibrate"; gap:12px 18px; align-items:start; }
+        @media (max-width:460px) {
+          .grid { grid-template-columns:1fr 1fr; grid-template-areas:"today dosing" "beaker beaker" "refill calibrate"; }
+          .beaker { margin:6px 0; }
+        }
         .today { grid-area:today; }
         .dosing { grid-area:dosing; text-align:right; }
         .beaker { grid-area:beaker; display:flex; justify-content:center; }
         .refill { grid-area:refill; align-self:end; }
         .calibrate { grid-area:calibrate; align-self:end; text-align:right; }
-        .label { color:var(--rf-grey); font-size:.8rem; letter-spacing:.05em; text-transform:uppercase; }
-        .big { color:var(--rf-blue); font-size:2.6rem; line-height:1.05; font-weight:300; }
-        .big small { font-size:1rem; color:var(--rf-blue); font-weight:400; }
-        .sub { color:var(--rf-grey); font-size:.85rem; margin-top:6px; line-height:1.35; }
-        .sub b { color:var(--rf-ink); }
-        .link { color:var(--rf-blue); cursor:pointer; font-weight:600; font-size:.85rem; }
+        .label { color:var(--secondary-text-color); font-size:.75rem; letter-spacing:.06em; text-transform:uppercase; }
+        .big { color:var(--rf-blue); font-size:2.4rem; line-height:1.05; font-weight:300; }
+        .big small { font-size:1rem; font-weight:400; }
+        .sub { color:var(--secondary-text-color); font-size:.82rem; margin-top:6px; line-height:1.4; }
+        .sub b { color:var(--primary-text-color); }
+        .link { color:var(--rf-blue); cursor:pointer; font-weight:600; font-size:.82rem; }
         .link:hover { text-decoration:underline; }
-        .btn { background:var(--rf-blue); color:#fff; border:none; border-radius:6px; padding:12px 18px; font-size:.95rem; cursor:pointer; transition:background .15s ease, transform .1s ease; }
-        .btn:hover { background:var(--rf-blue-d); } .btn:active { transform:translateY(1px); }
-        .btn.red { background:var(--rf-red); } .btn.wide { width:100%; }
-        .sideL { text-align:right; color:var(--rf-blue); font-size:.9rem; line-height:1.4; align-self:center; }
+        .btn { background:var(--rf-blue); color:#fff; border:none; border-radius:6px; padding:11px 16px; font-size:.9rem; cursor:pointer; transition:filter .15s ease, transform .1s ease; }
+        .btn:hover { filter:brightness(1.1); } .btn:active { transform:translateY(1px); }
+        .btn.red { background:var(--error-color,#e2574c); } .btn.wide { width:100%; }
+        .sideL { text-align:right; color:var(--rf-blue); font-size:.85rem; line-height:1.4; align-self:center; }
         .sideL b { font-weight:700; }
-        .warn { display:inline-block; background:#f8dcda; color:#b23; padding:3px 8px; border-radius:4px; font-size:.8rem; margin-bottom:4px; }
-        .cal-date { color:var(--rf-red); font-weight:700; }
+        .warn { display:inline-block; background:var(--error-color,#e2574c); color:#fff; padding:3px 8px; border-radius:4px; font-size:.78rem; margin-bottom:4px; }
+        .cal-date { color:var(--error-color,#e2574c); font-weight:700; }
         svg .grad { stroke:var(--rf-blue); stroke-width:1.5; }
-        svg .cap { stroke:var(--rf-blue); stroke-width:8; }
-        svg .fill { fill:var(--rf-blue); opacity:.35; transition:y .4s ease, height .4s ease; }
+        svg .cap { stroke:var(--rf-blue); stroke-width:7; }
+        svg .fill { fill:var(--rf-blue); opacity:.4; transition:y .4s ease, height .4s ease; }
         svg .outline { fill:none; stroke:var(--rf-blue); stroke-width:2; }
-        .beaker-wrap { display:flex; align-items:stretch; gap:10px; }
-        .cap-lbl { fill:var(--rf-blue); font-size:15px; }
-        /* dialog */
-        .modal { position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; z-index:9; }
-        .dialog { background:#fff; border-radius:8px; padding:22px; min-width:300px; max-width:420px; box-shadow:0 10px 40px rgba(0,0,0,.25); }
-        .dialog h3 { margin:0 0 6px; text-align:center; color:var(--rf-ink); }
-        .dialog p { color:var(--rf-grey); text-align:center; margin:0 0 16px; }
-        .dialog label { display:block; font-size:.8rem; color:var(--rf-grey); margin:10px 0 4px; }
-        .dialog input, .dialog select { width:100%; box-sizing:border-box; padding:10px; border:1px solid #cdd5dd; border-radius:5px; font-size:1rem; }
+        .beaker-wrap { display:flex; align-items:stretch; gap:8px; }
+        .cap-lbl { fill:var(--rf-blue); font-size:14px; }
+        /* dialog — themed */
+        .modal { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:9; }
+        .dialog { background:var(--ha-card-background,var(--card-background-color,#1f2226)); color:var(--primary-text-color); border-radius:10px; padding:22px; min-width:280px; max-width:min(92vw,420px); box-shadow:0 12px 44px rgba(0,0,0,.5); }
+        .dialog h3 { margin:0 0 6px; text-align:center; }
+        .dialog p { color:var(--secondary-text-color); text-align:center; margin:0 0 16px; font-size:.9rem; }
+        .dialog label { display:block; font-size:.78rem; color:var(--secondary-text-color); margin:10px 0 4px; }
+        .dialog input, .dialog select { width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--divider-color,#555); border-radius:6px; font-size:1rem; background:var(--primary-background-color,#111); color:var(--primary-text-color); }
         .row { display:flex; gap:10px; margin-top:18px; } .row .btn { flex:1; }
-        .days { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin:6px 0; }
-        .days button { border:1px solid var(--rf-blue); background:#fff; color:var(--rf-blue); border-radius:5px; padding:6px 10px; cursor:pointer; font-size:.85rem; }
-        .days button.on { background:var(--rf-blue); color:#fff; }
+        table { width:100%; border-collapse:collapse; font-size:.85rem; } th { color:var(--secondary-text-color); text-align:left; font-weight:600; }
       </style>
       <ha-card>
         <div class="grid">
@@ -368,4 +370,4 @@ window.customCards.push({
   name: "Reef Factory Doser",
   description: "Control card for the Reef Factory single-head doser (RFDP).",
 });
-console.info("%c REEF-FACTORY-DOSER-CARD %c v0.1 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c REEF-FACTORY-DOSER-CARD %c v0.8.1 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
