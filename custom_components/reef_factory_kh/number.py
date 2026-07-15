@@ -1,13 +1,14 @@
-"""Number platform for the KH Keeper."""
+"""Number platform for Reef Factory devices."""
 
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import KhConfigEntry
-from .const import FAMILY_KH
+from .const import FAMILY_DP, FAMILY_KH, UNIT_ML
 from .entity import KhEntity
 
 
@@ -16,8 +17,11 @@ async def async_setup_entry(
     entry: KhConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up KH Keeper numbers (KH family only)."""
+    """Set up numbers for whichever device family this entry is."""
     coordinator = entry.runtime_data
+    if coordinator.family == FAMILY_DP:
+        async_add_entities([DpReservoirLevel(coordinator), DpCapacity(coordinator)])
+        return
     if coordinator.family != FAMILY_KH:
         return
     async_add_entities([KhRemainingReagent(coordinator)])
@@ -43,3 +47,52 @@ class KhRemainingReagent(KhEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_reagent(value)
+
+
+class DpReservoirLevel(KhEntity, NumberEntity):
+    """Current reservoir volume (mL) — set it after a refill."""
+
+    _attr_name = "Reservoir Level"
+    _attr_native_unit_of_measurement = UNIT_ML
+    _attr_native_min_value = 0
+    _attr_native_max_value = 20000
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:cup-water"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "reservoir_level")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.data.container_ml if self.coordinator.data else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        state = self.coordinator.data
+        capacity = state.capacity_ml if state and state.capacity_ml else value
+        await self.coordinator.async_dp_set_container(value, capacity)
+
+
+class DpCapacity(KhEntity, NumberEntity):
+    """Container capacity (mL)."""
+
+    _attr_name = "Container Capacity"
+    _attr_native_unit_of_measurement = UNIT_ML
+    _attr_native_min_value = 0
+    _attr_native_max_value = 20000
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:cup-outline"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "container_capacity")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.data.capacity_ml if self.coordinator.data else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        state = self.coordinator.data
+        current = state.container_ml if state and state.container_ml else 0
+        await self.coordinator.async_dp_set_container(current, value)

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import voluptuous as vol
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import KhConfigEntry
@@ -24,6 +26,29 @@ async def async_setup_entry(
 
     if coordinator.family == FAMILY_DP:
         async_add_entities([DpDosing(coordinator)])
+        # Parameterised doser actions, registered on this one-per-device entity.
+        platform = entity_platform.async_get_current_platform()
+        platform.async_register_entity_service(
+            "manual_refill",
+            {
+                vol.Required("amount"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                vol.Optional("days", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
+            },
+            "async_service_manual_refill",
+        )
+        platform.async_register_entity_service(
+            "skip_next",
+            {vol.Required("percent"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100))},
+            "async_service_skip_next",
+        )
+        platform.async_register_entity_service(
+            "submit_calibration",
+            {
+                vol.Required("measured_ml"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                vol.Optional("period", default=3): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
+            },
+            "async_service_submit_calibration",
+        )
         return
 
     async_add_entities(
@@ -77,3 +102,15 @@ class DpDosing(KhEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return self.coordinator.data.dosing if self.coordinator.data else None
+
+    # Entity-service handlers (registered in async_setup_entry).
+    async def async_service_manual_refill(self, amount: float, days: int = 0) -> None:
+        await self.coordinator.async_dp_manual_refill(amount, days)
+
+    async def async_service_skip_next(self, percent: int) -> None:
+        await self.coordinator.async_dp_skip_next(percent)
+
+    async def async_service_submit_calibration(
+        self, measured_ml: float, period: int = 3
+    ) -> None:
+        await self.coordinator.async_dp_calibration_submit(measured_ml, period)

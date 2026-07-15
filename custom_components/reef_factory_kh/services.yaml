@@ -1,0 +1,79 @@
+manual_refill:
+  name: Manual refill
+  description: Dose an amount now, or spread it over several days.
+  target:
+    entity:
+      integration: reef_factory_kh
+      domain: binary_sensor
+  fields:
+    amount:
+      name: Amount
+      description: Total volume to dose (mL).
+      required: true
+      example: 10
+      selector:
+        number:
+          min: 0
+          max: 20000
+          step: 0.1
+          unit_of_measurement: mL
+    days:
+      name: Days
+      description: 0 = dose it all now; N = spread the amount over N days.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 255
+          step: 1
+
+skip_next:
+  name: Skip next dose
+  description: Skip a percentage of the next scheduled dose.
+  target:
+    entity:
+      integration: reef_factory_kh
+      domain: binary_sensor
+  fields:
+    percent:
+      name: Percent
+      description: How much of the next dose to skip (0-100%).
+      required: true
+      example: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+submit_calibration:
+  name: Submit calibration
+  description: >-
+    Submit the measured volume after a 30-second calibration run (use the
+    Fill Circuit then Run Calibration buttons first, catch the output in a cup).
+  target:
+    entity:
+      integration: reef_factory_kh
+      domain: binary_sensor
+  fields:
+    measured_ml:
+      name: Measured volume
+      description: Volume (mL) that came out during the 30-second run.
+      required: true
+      example: 11.48
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 0.01
+          unit_of_measurement: mL
+    period:
+      name: Reminder period
+      description: "Recalibration reminder code (1=1wk, 2=2wk, ~=1mo, 3=3mo)."
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 255
+          step: 1

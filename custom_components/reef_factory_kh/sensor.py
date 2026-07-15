@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -17,6 +17,7 @@ from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
+from homeassistant.util import dt as dt_util
 
 from . import KhConfigEntry
 from .const import FAMILY_DP, UNIT_DKH, UNIT_ML
@@ -33,7 +34,9 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
 
     if coordinator.family == FAMILY_DP:
-        async_add_entities(DpSensor(coordinator, desc) for desc in DP_SENSORS)
+        entities: list[SensorEntity] = [DpSensor(coordinator, desc) for desc in DP_SENSORS]
+        entities += [DpDosedToday(coordinator), DpNextDose(coordinator)]
+        async_add_entities(entities)
         return
 
     async_add_entities(
@@ -210,7 +213,7 @@ DP_SENSORS: tuple[DpSensorDescription, ...] = (
     ),
     DpSensorDescription(
         key="daily_total",
-        name="Daily Dose Total",
+        name="Today's Dose Total",
         native_unit_of_measurement=UNIT_ML,
         icon="mdi:beaker-outline",
         suggested_display_precision=2,
@@ -246,6 +249,28 @@ DP_SENSORS: tuple[DpSensorDescription, ...] = (
         icon="mdi:clock-check-outline",
         value_fn=lambda s: s.last_dose_at,
     ),
+    DpSensorDescription(
+        key="time_left",
+        name="Time Left",
+        native_unit_of_measurement="d",
+        icon="mdi:calendar-clock",
+        suggested_display_precision=1,
+        value_fn=lambda s: s.time_left_days,
+    ),
+    DpSensorDescription(
+        key="dosing_days",
+        name="Dosing Days",
+        icon="mdi:calendar-week",
+        value_fn=lambda s: ", ".join(s.active_days) if s.active_days else "None",
+    ),
+    DpSensorDescription(
+        key="next_calibration",
+        name="Next Calibration",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:progress-wrench",
+        value_fn=lambda s: s.calibration_date,
+    ),
 )
 
 
@@ -263,3 +288,86 @@ class DpSensor(KhEntity, SensorEntity):
         if self.coordinator.data is None:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+
+class DpDosedToday(KhEntity, SensorEntity):
+    """Total volume actually dosed today (sum of today's history), with the log."""
+
+    _attr_name = "Dosed Today"
+    _attr_native_unit_of_measurement = UNIT_ML
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:beaker-check-outline"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "dosed_today")
+
+    @property
+    def native_value(self) -> float | None:
+        state = self.coordinator.data
+        if state is None:
+            return None
+        today = dt_util.now().date()
+        return round(
+            sum(d.volume_ml for d in state.history if d.timestamp and d.timestamp.date() == today),
+            2,
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data
+        if state is None:
+            return {}
+        return {
+            "history": [
+                {
+                    "time": d.timestamp.isoformat() if d.timestamp else None,
+                    "ml": d.volume_ml,
+                    "type": "manual" if d.manual else "scheduled",
+                }
+                for d in state.history
+            ]
+        }
+
+
+class DpNextDose(KhEntity, SensorEntity):
+    """Timestamp of the next scheduled dose, with amount + full schedule."""
+
+    _attr_name = "Next Dose"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "next_dose")
+
+    def _next(self):
+        state = self.coordinator.data
+        if state is None:
+            return None, None
+        now = dt_util.now()
+        nxt = state.next_dose(now.hour * 60 + now.minute)
+        return now, nxt
+
+    @property
+    def native_value(self) -> datetime | None:
+        now, nxt = self._next()
+        if nxt is None:
+            return None
+        minute, _ml = nxt
+        target = now.replace(hour=minute // 60, minute=minute % 60, second=0, microsecond=0)
+        if minute <= now.hour * 60 + now.minute:
+            target += timedelta(days=1)
+        return target
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data
+        if state is None:
+            return {}
+        _now, nxt = self._next()
+        return {
+            "amount_ml": nxt[1] if nxt else None,
+            "schedule": [
+                {"time": f"{m // 60:02d}:{m % 60:02d}", "ml": v} for m, v in state.timetable
+            ],
+        }

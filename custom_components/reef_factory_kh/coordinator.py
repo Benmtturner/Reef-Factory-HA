@@ -62,6 +62,12 @@ from .protocol import (
     decode_settings,
     decode_status,
     detect_family,
+    encode_dp_calibration_notification,
+    encode_dp_calibration_value,
+    encode_dp_container,
+    encode_dp_doses,
+    encode_dp_manual_refill,
+    encode_dp_skip,
     encode_reagent,
     parse_frame,
 )
@@ -219,16 +225,16 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
     # ------------------------------------------------------------------
 
     async def async_send(
-        self, command: str, subcommand: str, payload: bytes = b""
+        self, command: str, subcommand: str, payload: bytes = b"", identifier: str = ""
     ) -> None:
         """Send a command frame to the device over the LAN WebSocket."""
         ws = self._ws
         if ws is None or ws.closed or not self.serial:
-            raise HomeAssistantError(f"KH Keeper {self.host} is not connected")
+            raise HomeAssistantError(f"{self.model} at {self.host} is not connected")
 
         _LOGGER.debug("TX %s/%s payload=%s", command, subcommand, payload.hex())
         await ws.send_bytes(
-            build_frame(self.serial, command, subcommand, payload=payload)
+            build_frame(self.serial, command, subcommand, identifier, payload)
         )
 
     async def async_set_reagent(self, ml: float) -> None:
@@ -242,6 +248,60 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
     async def async_cancel_measurement(self) -> None:
         """Cancel the measurement in progress."""
         await self.async_send("khMeasurement", "cancel")
+
+    # -- Doser (RFDP) commands ------------------------------------------
+    # Each carries an epoch-ms nonce (as the app does) and then asks for a
+    # fresh settings frame so entities update immediately.
+
+    def _dp_ident(self) -> str:
+        return str(int(dt_util.utcnow().timestamp() * 1000))
+
+    async def _dp_send(self, command: str, subcommand: str, payload: bytes = b"\x00") -> None:
+        await self.async_send(command, subcommand, payload, self._dp_ident())
+        ws = self._ws
+        if ws is not None and not ws.closed and self.serial:
+            await ws.send_bytes(build_frame(self.serial, "dpGet", "settings"))
+
+    async def async_dp_set_container(self, current_ml: float, capacity_ml: float) -> None:
+        """Set reservoir level + capacity (e.g. after a refill)."""
+        await self._dp_send("dpSet", "container", encode_dp_container(current_ml, capacity_ml))
+
+    async def async_dp_manual_refill(self, amount_ml: float, days: int = 0) -> None:
+        """Dose amount now (days=0) or spread over N days."""
+        await self._dp_send("dpManualRefill", "start", encode_dp_manual_refill(amount_ml, days))
+
+    async def async_dp_stop_refill(self) -> None:
+        """Cancel the active/pending manual refill."""
+        await self._dp_send("dpManualRefill", "stop", b"\x00")
+
+    async def async_dp_skip_next(self, percent: int) -> None:
+        """Skip a percentage (0-100) of the next scheduled dose."""
+        await self._dp_send("dpSet", "skipNext", encode_dp_skip(percent))
+
+    async def async_dp_write_doses(
+        self, doses: list[tuple[int, float]], day_mask: int
+    ) -> None:
+        """Write the full dose schedule (times/volumes) + day mask."""
+        await self._dp_send("dpSet", "doses", encode_dp_doses(doses, day_mask))
+
+    async def async_dp_calibration_fill(self) -> None:
+        """Calibration step: prime the tube (FILL THE CIRCUIT)."""
+        await self._dp_send("dpCalibration", "circuitStart", b"\x00")
+
+    async def async_dp_calibration_run(self) -> None:
+        """Calibration step: run the pump ~30 s (dispense into a cup)."""
+        await self._dp_send("dpCalibration", "start", b"\x00")
+
+    async def async_dp_calibration_submit(
+        self, measured_ml: float, period_code: int = 3
+    ) -> None:
+        """Submit the measured volume + set the recalibration reminder period."""
+        ident = self._dp_ident()
+        await self.async_send("dpCalibration", "value", encode_dp_calibration_value(measured_ml), ident)
+        await self.async_send("dpCalibration", "notification", encode_dp_calibration_notification(period_code), ident)
+        ws = self._ws
+        if ws is not None and not ws.closed and self.serial:
+            await ws.send_bytes(build_frame(self.serial, "dpGet", "settings"))
 
     def _persist(self, key: str, value: str) -> None:
         """Persist a value into the config entry (survives restarts)."""
@@ -444,7 +504,7 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         """Doser frames: settings (level + schedule), status (live), dose."""
         if frame.command == "dpRefresh" and frame.subcommand == "settings":
             try:
-                state = decode_dp_settings(frame.payload)
+                state = decode_dp_settings(frame.payload, tz=dt_util.DEFAULT_TIME_ZONE)
             except (ValueError, IndexError) as err:
                 _LOGGER.debug("Bad dp settings frame from %s: %s", self.host, err)
                 return
