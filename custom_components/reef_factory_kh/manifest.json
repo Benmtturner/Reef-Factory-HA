@@ -1,7 +1,7 @@
 {
   "domain": "reef_factory_kh",
   "name": "Reef Factory",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "codeowners": [
     "@Benmtturner"
   ],
@@ -16,5 +16,5 @@
   "iot_class": "local_push",
   "integration_type": "device",
   "requirements": [],
-  "dependencies": []
+  "dependencies": ["http", "frontend"]
 }
