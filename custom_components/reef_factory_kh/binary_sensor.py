@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import voluptuous as vol
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -113,6 +115,17 @@ class DpDosing(KhEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return self.coordinator.data.dosing if self.coordinator.data else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data
+        if state is None:
+            return {}
+        return {
+            "refill_active": bool(state.refill_total_ml),
+            "refill_total_ml": state.refill_total_ml,
+            "refill_days": state.refill_days,
+        }
 
     # Entity-service handlers (registered in async_setup_entry).
     async def async_service_manual_refill(self, amount: float, days: int = 0) -> None:

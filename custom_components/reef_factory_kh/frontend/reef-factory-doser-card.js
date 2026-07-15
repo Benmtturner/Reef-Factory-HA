@@ -1,14 +1,13 @@
 /*
- * Reef Factory Doser card — a Lovelace card for the RFDP single-head doser
- * served by the reef_factory_kh integration (v0.7+).
+ * Reef Factory Doser card — a Lovelace card for the RFDP single-head doser.
  *
- * Install: copy to <config>/www/reef-factory-doser-card.js, then add a Lovelace
- * resource (Settings → Dashboards → ⋮ → Resources) of type "JavaScript module"
- * pointing at /local/reef-factory-doser-card.js.
+ * The reef_factory_kh integration bundles and auto-loads this file (served at
+ * /reef_factory_kh/reef-factory-doser-card.js), so no manual www/ copy or
+ * Lovelace-resource step is needed — just add the card:
  *
- * Config (one entity from the doser device is enough — the card finds the rest):
  *   type: custom:reef-factory-doser-card
- *   entity: sensor.x1_dosser_container_level
+ *   entity: sensor.x1_dosser_container_level   # any entity of the doser device
+ *   grid_options: { columns: full }            # give it full width in sections
  */
 
 const NS = "http://www.w3.org/2000/svg";
@@ -133,6 +132,10 @@ class ReefFactoryDoserCard extends HTMLElement {
         .dialog input, .dialog select { width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--divider-color,#555); border-radius:6px; font-size:1rem; background:var(--primary-background-color,#111); color:var(--primary-text-color); }
         .row { display:flex; gap:10px; margin-top:18px; } .row .btn { flex:1; }
         table { width:100%; border-collapse:collapse; font-size:.85rem; } th { color:var(--secondary-text-color); text-align:left; font-weight:600; }
+        .days { display:flex; flex-wrap:wrap; gap:6px; }
+        .days .day { border:1px solid var(--rf-blue); background:transparent; color:var(--rf-blue); border-radius:5px; padding:5px 9px; cursor:pointer; font-size:.82rem; }
+        .days .day.on { background:var(--rf-blue); color:#fff; }
+        hr { border:none; border-top:1px solid var(--divider-color,#444); margin:18px 0; }
       </style>
       <ha-card>
         <div class="grid">
@@ -167,10 +170,9 @@ class ReefFactoryDoserCard extends HTMLElement {
     `;
     this._drawBeaker();
     const $ = (id) => root.getElementById(id);
-    $("refillBtn").onclick = () => this._dlgRefill();
     $("editBtn").onclick = () => this._dlgEdit();
     $("calBtn").onclick = () => this._dlgCalibrate();
-    $("dosingBtn").onclick = () => this._dlgSkip();
+    $("dosingBtn").onclick = () => this._dlgSchedule();
     $("showmore").onclick = () => this._dlgHistory();
     this.$ = $;
   }
@@ -255,6 +257,19 @@ class ReefFactoryDoserCard extends HTMLElement {
       const overdue = cd.getFullYear() < 2020 || cd < new Date();
       this.$("calwarn").style.display = overdue ? "inline-block" : "none";
     }
+
+    // MANUAL REFILL ⇄ CANCEL MANUAL REFILL, driven by the active-refill flag
+    const refillActive = this._st("dosing")?.attributes?.refill_active;
+    const rb = this.$("refillBtn");
+    if (refillActive) {
+      rb.textContent = "CANCEL MANUAL REFILL";
+      rb.classList.add("red");
+      rb.onclick = () => this._e.stopRefill && this._call("button", "press", { entity_id: this._e.stopRefill });
+    } else {
+      rb.textContent = "MANUAL REFILL";
+      rb.classList.remove("red");
+      rb.onclick = () => this._dlgRefill();
+    }
   }
 
   // --- dialogs -------------------------------------------------------------
@@ -309,15 +324,46 @@ class ReefFactoryDoserCard extends HTMLElement {
     };
   }
 
-  _dlgSkip() {
+  _dlgSchedule() {
+    const schedule = this._st("nextDose")?.attributes?.schedule || [];
+    const total = schedule.reduce((a, s) => a + (Number(s.ml) || 0), 0);
+    const count = Math.round(this._num("numDoses")) || schedule.length || 24;
+    const active = new Set((this._st("dosingDays")?.state || "").split(",").map((d) => d.trim()));
+    const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const daysHtml = DAYS.map(
+      (d) => `<button type="button" class="day${active.has(d) ? " on" : ""}" data-d="${d}">${d}</button>`
+    ).join("");
     const host = this._modal(`
-      <h3>Skip next dose</h3><p>How much of the next dose to skip (%).</p>
-      <input id="pct" type="number" min="0" max="100" step="1" value="100" />
-      <div class="row"><button class="btn" id="ok">OK</button><button class="btn red" id="cancel">CANCEL</button></div>
+      <h3>Dosing schedule</h3>
+      <label>Number of doses</label><input id="count" type="number" min="1" max="24" value="${count}" />
+      <label>Daily total (ml) — split evenly</label><input id="total" type="number" min="0" step="0.1" value="${total.toFixed(2)}" />
+      <label>Days</label><div class="days">${daysHtml}</div>
+      <div class="row"><button class="btn" id="save">SAVE SCHEDULE</button><button class="btn" id="cancel">CLOSE</button></div>
+      <hr>
+      <label>Skip next dose (%)</label><input id="skip" type="number" min="0" max="100" value="100" />
+      <div class="row"><button class="btn red" id="skipbtn">SKIP NEXT DOSE</button></div>
     `);
+    const sel = new Set(active);
+    host.querySelectorAll(".day").forEach((b) => {
+      b.onclick = () => {
+        const d = b.dataset.d;
+        if (sel.has(d)) { sel.delete(d); b.classList.remove("on"); }
+        else { sel.add(d); b.classList.add("on"); }
+      };
+    });
     host.querySelector("#cancel").onclick = () => this._close();
-    host.querySelector("#ok").onclick = () => {
-      const percent = parseInt(host.querySelector("#pct").value, 10);
+    host.querySelector("#save").onclick = () => {
+      const number_of_doses = parseInt(host.querySelector("#count").value, 10);
+      const daily_total_ml = parseFloat(host.querySelector("#total").value);
+      if (!isNaN(number_of_doses) && !isNaN(daily_total_ml)) {
+        const data = { entity_id: this._refillTarget(), number_of_doses, daily_total_ml };
+        if (sel.size) data.days = [...sel];
+        this._call("reef_factory_kh", "set_schedule", data);
+      }
+      this._close();
+    };
+    host.querySelector("#skipbtn").onclick = () => {
+      const percent = parseInt(host.querySelector("#skip").value, 10);
       if (!isNaN(percent)) this._call("reef_factory_kh", "skip_next", { entity_id: this._refillTarget(), percent });
       this._close();
     };
@@ -370,4 +416,4 @@ window.customCards.push({
   name: "Reef Factory Doser",
   description: "Control card for the Reef Factory single-head doser (RFDP).",
 });
-console.info("%c REEF-FACTORY-DOSER-CARD %c v0.8.1 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c REEF-FACTORY-DOSER-CARD %c v0.8.2 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
