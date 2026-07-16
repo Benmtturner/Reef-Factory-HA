@@ -116,3 +116,31 @@ set_schedule:
         select:
           multiple: true
           options: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+
+set_doses:
+  name: Set doses (per-dose schedule)
+  description: >-
+    Write an explicit per-dose schedule — a list of individual doses, each with
+    its own time and volume — on the chosen days. Powers the card's per-dose grid
+    and adjust-by-%.
+  target:
+    entity:
+      integration: reef_factory_kh
+      domain: binary_sensor
+  fields:
+    doses:
+      name: Doses
+      description: >-
+        List of doses, each an object {time: "HH:MM", ml: <volume>}. Up to 24;
+        order does not matter (sorted by time).
+      required: true
+      example: '[{"time": "08:00", "ml": 2.5}, {"time": "20:00", "ml": 2.5}]'
+      selector:
+        object:
+    days:
+      name: Days
+      description: Days to dose on (defaults to the current selection).
+      selector:
+        select:
+          multiple: true
+          options: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]

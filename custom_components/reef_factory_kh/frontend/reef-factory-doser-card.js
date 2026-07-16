@@ -38,6 +38,16 @@ const ROLES = {
 const fmt = (v, d = 2, unit = "") =>
   v == null || isNaN(v) ? "—" : `${Number(v).toFixed(d)}${unit}`;
 
+// "H:MM"/"HH:MM" → "HH:MM" (for <input type=time>) and → minutes-of-day.
+const hhmm = (t) => {
+  const [h, m] = String(t == null ? "0:00" : t).split(":");
+  return `${String(Number(h) || 0).padStart(2, "0")}:${String(Number(m) || 0).padStart(2, "0")}`;
+};
+const toMin = (t) => {
+  const [h, m] = String(t == null ? "0:00" : t).split(":");
+  return (Number(h) || 0) * 60 + (Number(m) || 0);
+};
+
 class ReefFactoryDoserCard extends HTMLElement {
   setConfig(config) {
     if (!config.entity) throw new Error("Set 'entity' to any entity of the doser device");
@@ -137,6 +147,27 @@ class ReefFactoryDoserCard extends HTMLElement {
         .days .day { border:1px solid var(--rf-blue); background:transparent; color:var(--rf-blue); border-radius:5px; padding:5px 9px; cursor:pointer; font-size:.82rem; }
         .days .day.on { background:var(--rf-blue); color:#fff; }
         hr { border:none; border-top:1px solid var(--divider-color,#444); margin:18px 0; }
+        .dialog.wide { max-width:min(94vw,560px); }
+        .btn.grn { background:var(--success-color,#43a047); }
+        .btn.ghost { background:transparent; color:var(--rf-blue); border:1px solid var(--rf-blue); }
+        .menu { display:flex; flex-direction:column; gap:8px; }
+        .menu .btn { width:100%; }
+        .sched-top { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; font-size:.85rem; color:var(--secondary-text-color); }
+        .sched-top b { color:var(--primary-text-color); }
+        .sched-acts { display:flex; gap:6px; flex:0 0 auto; }
+        .sched-acts .btn { padding:8px 10px; font-size:.78rem; }
+        .adj { display:flex; gap:6px; align-items:center; margin:12px 0 4px; }
+        .adj select, .adj input { flex:1; padding:8px; box-sizing:border-box; border:1px solid var(--divider-color,#555); border-radius:6px; background:var(--primary-background-color,#111); color:var(--primary-text-color); }
+        .adj .btn { flex:0 0 auto; }
+        .sched-head, .sched-row { display:grid; grid-template-columns:30px 1fr 1fr 52px 26px; gap:6px; align-items:center; }
+        .sched-head { color:var(--secondary-text-color); font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; padding:10px 2px 6px; }
+        .sched-rows { max-height:46vh; overflow:auto; }
+        .sched-row { padding:3px 0; }
+        .sched-row input { width:100%; box-sizing:border-box; padding:7px 6px; border:1px solid var(--divider-color,#555); border-radius:6px; font-size:.9rem; background:var(--primary-background-color,#111); color:var(--primary-text-color); }
+        .sched-row .rid { text-align:center; color:var(--secondary-text-color); font-size:.82rem; }
+        .sched-row .rpct { text-align:right; color:var(--secondary-text-color); font-size:.8rem; }
+        .sched-row .rdel { background:none; border:none; color:var(--error-color,#e2574c); cursor:pointer; font-size:1.05rem; line-height:1; padding:2px; }
+        textarea { box-sizing:border-box; background:var(--primary-background-color,#111); color:var(--primary-text-color); border:1px solid var(--divider-color,#555); border-radius:6px; padding:8px; }
       </style>
       <ha-card>
         <div class="grid">
@@ -173,7 +204,7 @@ class ReefFactoryDoserCard extends HTMLElement {
     const $ = (id) => root.getElementById(id);
     $("editBtn").onclick = () => this._dlgEdit();
     $("calBtn").onclick = () => this._dlgCalibrate();
-    $("dosingBtn").onclick = () => this._dlgSchedule();
+    $("dosingBtn").onclick = () => this._dlgDosing();
     $("showmore").onclick = () => this._dlgHistory();
     this.$ = $;
   }
@@ -274,9 +305,9 @@ class ReefFactoryDoserCard extends HTMLElement {
   }
 
   // --- dialogs -------------------------------------------------------------
-  _modal(inner) {
+  _modal(inner, cls = "") {
     const host = this.shadowRoot.getElementById("modalHost");
-    host.innerHTML = `<div class="modal"><div class="dialog">${inner}</div></div>`;
+    host.innerHTML = `<div class="modal"><div class="dialog ${cls}">${inner}</div></div>`;
     host.querySelector(".modal").addEventListener("click", (e) => {
       if (e.target.classList.contains("modal")) host.innerHTML = "";
     });
@@ -325,25 +356,50 @@ class ReefFactoryDoserCard extends HTMLElement {
     };
   }
 
+  // DOSING → menu (mirrors the app: edit / skip / export / import / history).
+  _dlgDosing() {
+    const host = this._modal(`
+      <h3>Dosing</h3>
+      <div class="menu">
+        <button class="btn" id="edit">EDIT SCHEDULE</button>
+        <button class="btn" id="skip">SKIP NEXT DOSE</button>
+        <button class="btn ghost" id="export">EXPORT</button>
+        <button class="btn ghost" id="import">IMPORT</button>
+        <button class="btn ghost" id="history">HISTORY</button>
+      </div>
+      <div class="row"><button class="btn ghost" id="cancel">CANCEL</button></div>
+    `);
+    host.querySelector("#edit").onclick = () => this._dlgSchedule();
+    host.querySelector("#skip").onclick = () => this._dlgSkip();
+    host.querySelector("#export").onclick = () => this._dlgExport();
+    host.querySelector("#import").onclick = () => this._dlgImport();
+    host.querySelector("#history").onclick = () => this._dlgHistory();
+    host.querySelector("#cancel").onclick = () => this._close();
+  }
+
+  // Per-dose grid: ID / Time / Value / Percent / ✕, with Add + Adjust + days.
   _dlgSchedule() {
-    const schedule = this._st("nextDose")?.attributes?.schedule || [];
-    const total = schedule.reduce((a, s) => a + (Number(s.ml) || 0), 0);
-    const count = Math.round(this._num("numDoses")) || schedule.length || 24;
-    const active = new Set((this._st("dosingDays")?.state || "").split(",").map((d) => d.trim()));
+    const src = this._st("nextDose")?.attributes?.schedule || [];
+    let rows = src.map((s) => ({ time: hhmm(s.time), ml: Number(s.ml) || 0 }));
+    if (!rows.length) rows = [{ time: "00:00", ml: 1 }];
+    const active = new Set((this._st("dosingDays")?.state || "").split(",").map((d) => d.trim()).filter(Boolean));
     const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    const daysHtml = DAYS.map(
-      (d) => `<button type="button" class="day${active.has(d) ? " on" : ""}" data-d="${d}">${d}</button>`
-    ).join("");
     const host = this._modal(`
       <h3>Dosing schedule</h3>
-      <label>Number of doses</label><input id="count" type="number" min="1" max="24" value="${count}" />
-      <label>Daily total (ml) — split evenly</label><input id="total" type="number" min="0" step="0.1" value="${total.toFixed(2)}" />
-      <label>Days</label><div class="days">${daysHtml}</div>
-      <div class="row"><button class="btn" id="save">SAVE SCHEDULE</button><button class="btn" id="cancel">CLOSE</button></div>
-      <hr>
-      <label>Skip next dose (%)</label><input id="skip" type="number" min="0" max="100" value="100" />
-      <div class="row"><button class="btn red" id="skipbtn">SKIP NEXT DOSE</button></div>
-    `);
+      <div class="sched-top">
+        <div>Liquid amount <b id="total">—</b> ml<br>Number of doses <b id="count">—</b></div>
+        <div class="sched-acts">
+          <button class="btn grn" id="adjust">ADJUST</button>
+          <button class="btn grn" id="add">ADD A DOSE</button>
+        </div>
+      </div>
+      <div id="adjbar"></div>
+      <div class="days" id="days">${DAYS.map((d) => `<button type="button" class="day${active.has(d) ? " on" : ""}" data-d="${d}">${d}</button>`).join("")}</div>
+      <div class="sched-head"><span>ID</span><span>Time</span><span>Value</span><span>%</span><span></span></div>
+      <div id="rows" class="sched-rows"></div>
+      <div class="row"><button class="btn" id="save">SAVE</button><button class="btn ghost" id="cancel">CANCEL</button></div>
+    `, "wide");
+
     const sel = new Set(active);
     host.querySelectorAll(".day").forEach((b) => {
       b.onclick = () => {
@@ -352,20 +408,152 @@ class ReefFactoryDoserCard extends HTMLElement {
         else { sel.add(d); b.classList.add("on"); }
       };
     });
+
+    const refreshTotals = () => {
+      const total = rows.reduce((a, r) => a + (Number(r.ml) || 0), 0);
+      host.querySelector("#total").textContent = total.toFixed(2);
+      host.querySelector("#count").textContent = String(rows.length);
+      host.querySelectorAll(".rpct").forEach((el, i) => {
+        const ml = Number(rows[i] ? rows[i].ml : 0) || 0;
+        el.textContent = (total ? (ml / total) * 100 : 0).toFixed(2) + "%";
+      });
+    };
+    const renderRows = () => {
+      const rowsEl = host.querySelector("#rows");
+      rowsEl.innerHTML = rows
+        .map(
+          (r, i) => `
+        <div class="sched-row">
+          <span class="rid">${i + 1}</span>
+          <input class="rtime" data-i="${i}" type="time" value="${hhmm(r.time)}" />
+          <input class="rml" data-i="${i}" type="number" min="0" step="0.01" value="${r.ml}" />
+          <span class="rpct">0%</span>
+          <button class="rdel" data-i="${i}" title="Remove">✕</button>
+        </div>`
+        )
+        .join("");
+      rowsEl.querySelectorAll(".rtime").forEach((el) => {
+        el.onchange = () => { rows[+el.dataset.i].time = el.value || "00:00"; };
+      });
+      rowsEl.querySelectorAll(".rml").forEach((el) => {
+        el.onchange = () => { rows[+el.dataset.i].ml = parseFloat(el.value) || 0; refreshTotals(); };
+      });
+      rowsEl.querySelectorAll(".rdel").forEach((el) => {
+        el.onclick = () => {
+          rows.splice(+el.dataset.i, 1);
+          if (!rows.length) rows.push({ time: "00:00", ml: 1 });
+          renderRows();
+        };
+      });
+      refreshTotals();
+    };
+
+    host.querySelector("#add").onclick = () => {
+      const used = new Set(rows.map((r) => hhmm(r.time)));
+      let t = "12:00";
+      for (let h = 0; h < 24; h++) {
+        const c = `${String(h).padStart(2, "0")}:00`;
+        if (!used.has(c)) { t = c; break; }
+      }
+      const avg = rows.length ? rows.reduce((a, r) => a + r.ml, 0) / rows.length : 1;
+      rows.push({ time: t, ml: Math.round((avg || 1) * 100) / 100 });
+      rows.sort((a, b) => toMin(a.time) - toMin(b.time));
+      renderRows();
+    };
+
+    const adjbar = host.querySelector("#adjbar");
+    host.querySelector("#adjust").onclick = () => {
+      if (adjbar.innerHTML) { adjbar.innerHTML = ""; return; }
+      adjbar.innerHTML = `
+        <div class="adj">
+          <select id="adjmode"><option value="pct">Adjust by %</option><option value="val">Set total (ml)</option></select>
+          <input id="adjval" type="number" step="0.1" value="100" />
+          <button class="btn red" id="adjupd">UPDATE</button>
+        </div>`;
+      const modeEl = adjbar.querySelector("#adjmode");
+      const valEl = adjbar.querySelector("#adjval");
+      modeEl.onchange = () => {
+        valEl.value = modeEl.value === "pct" ? "100" : rows.reduce((a, r) => a + r.ml, 0).toFixed(2);
+      };
+      adjbar.querySelector("#adjupd").onclick = () => {
+        const v = parseFloat(valEl.value);
+        if (isNaN(v)) return;
+        const total = rows.reduce((a, r) => a + r.ml, 0);
+        const factor = modeEl.value === "pct" ? v / 100 : total ? v / total : 0;
+        rows = rows.map((r) => ({ time: r.time, ml: Math.round(r.ml * factor * 100) / 100 }));
+        renderRows();
+      };
+    };
+
     host.querySelector("#cancel").onclick = () => this._close();
     host.querySelector("#save").onclick = () => {
-      const number_of_doses = parseInt(host.querySelector("#count").value, 10);
-      const daily_total_ml = parseFloat(host.querySelector("#total").value);
-      if (!isNaN(number_of_doses) && !isNaN(daily_total_ml)) {
-        const data = { entity_id: this._refillTarget(), number_of_doses, daily_total_ml };
+      const doses = rows
+        .map((r) => ({ time: hhmm(r.time), ml: Number(r.ml) || 0 }))
+        .filter((r) => r.ml > 0)
+        .sort((a, b) => toMin(a.time) - toMin(b.time));
+      if (doses.length) {
+        const data = { entity_id: this._refillTarget(), doses };
         if (sel.size) data.days = [...sel];
-        this._call("reef_factory_kh", "set_schedule", data);
+        this._call("reef_factory_kh", "set_doses", data);
       }
       this._close();
     };
-    host.querySelector("#skipbtn").onclick = () => {
-      const percent = parseInt(host.querySelector("#skip").value, 10);
+
+    renderRows();
+  }
+
+  _dlgSkip() {
+    const host = this._modal(`
+      <h3>Skip next dose</h3><p>How much of the next dose to skip (%).</p>
+      <input id="pct" type="number" min="0" max="100" value="100" />
+      <div class="row"><button class="btn red" id="ok">OK</button><button class="btn ghost" id="cancel">CANCEL</button></div>
+    `);
+    host.querySelector("#cancel").onclick = () => this._close();
+    host.querySelector("#ok").onclick = () => {
+      const percent = parseInt(host.querySelector("#pct").value, 10);
       if (!isNaN(percent)) this._call("reef_factory_kh", "skip_next", { entity_id: this._refillTarget(), percent });
+      this._close();
+    };
+  }
+
+  _dlgExport() {
+    const doses = (this._st("nextDose")?.attributes?.schedule || []).map((s) => ({ time: hhmm(s.time), ml: Number(s.ml) || 0 }));
+    const days = this._st("dosingDays")?.state || "";
+    const json = JSON.stringify({ days, doses }, null, 2);
+    const host = this._modal(`
+      <h3>Export schedule</h3><p>Copy this to back up or share the schedule.</p>
+      <textarea id="json" readonly style="width:100%;height:220px;">${json}</textarea>
+      <div class="row"><button class="btn" id="copy">COPY</button><button class="btn ghost" id="cancel">CLOSE</button></div>
+    `, "wide");
+    host.querySelector("#copy").onclick = () => {
+      const ta = host.querySelector("#json");
+      ta.select();
+      try { navigator.clipboard.writeText(ta.value); } catch (_) { document.execCommand("copy"); }
+    };
+    host.querySelector("#cancel").onclick = () => this._close();
+  }
+
+  _dlgImport() {
+    const host = this._modal(`
+      <h3>Import schedule</h3><p>Paste an exported schedule to apply it.</p>
+      <textarea id="json" placeholder='{"doses":[{"time":"08:00","ml":2.5}]}' style="width:100%;height:200px;"></textarea>
+      <div class="sub" id="err" style="color:var(--error-color,#e2574c);"></div>
+      <div class="row"><button class="btn red" id="apply">APPLY</button><button class="btn ghost" id="cancel">CANCEL</button></div>
+    `, "wide");
+    host.querySelector("#cancel").onclick = () => this._close();
+    host.querySelector("#apply").onclick = () => {
+      let obj;
+      try { obj = JSON.parse(host.querySelector("#json").value); } catch (_) { host.querySelector("#err").textContent = "Invalid JSON."; return; }
+      const doses = (obj.doses || [])
+        .map((d) => ({ time: hhmm(d.time), ml: Number(d.ml) || 0 }))
+        .filter((d) => d.ml > 0);
+      if (!doses.length) { host.querySelector("#err").textContent = "No valid doses found."; return; }
+      const data = { entity_id: this._refillTarget(), doses };
+      if (obj.days) {
+        const dd = String(obj.days).split(",").map((x) => x.trim()).filter(Boolean);
+        if (dd.length) data.days = dd;
+      }
+      this._call("reef_factory_kh", "set_doses", data);
       this._close();
     };
   }
@@ -434,4 +622,4 @@ window.customCards.push({
   name: "Reef Factory Doser",
   description: "Control card for the Reef Factory single-head doser (RFDP).",
 });
-console.info("%c REEF-FACTORY-DOSER-CARD %c v0.9.1 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c REEF-FACTORY-DOSER-CARD %c v0.10.0 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");

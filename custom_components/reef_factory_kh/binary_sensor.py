@@ -62,6 +62,25 @@ async def async_setup_entry(
             },
             "async_service_set_schedule",
         )
+        platform.async_register_entity_service(
+            "set_doses",
+            {
+                vol.Required("doses"): vol.All(
+                    cv.ensure_list,
+                    [
+                        {
+                            vol.Required("time"): cv.time,
+                            vol.Required("ml"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                        }
+                    ],
+                    vol.Length(min=1, max=24),
+                ),
+                vol.Optional("days"): vol.All(
+                    cv.ensure_list, [vol.In(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])]
+                ),
+            },
+            "async_service_set_doses",
+        )
         return
 
     async_add_entities(
@@ -139,6 +158,15 @@ class DpDosing(KhEntity, BinarySensorEntity):
     ) -> None:
         await self.coordinator.async_dp_calibration_submit(measured_ml, period)
 
+    def _resolve_day_mask(self, days: list[str] | None) -> int:
+        """Day bitfield (bit0=Sun..bit6=Sat, bit7=enabled) from weekday names, or
+        keep the device's current days when none are given."""
+        if days:
+            bit = {"Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6}
+            return 0x80 | sum(1 << bit[d] for d in days)
+        state = self.coordinator.data
+        return state.day_mask if state and state.day_mask else 0xFF
+
     async def async_service_set_schedule(
         self, number_of_doses: int, daily_total_ml: float, days: list[str] | None = None
     ) -> None:
@@ -147,10 +175,16 @@ class DpDosing(KhEntity, BinarySensorEntity):
         count = number_of_doses
         per_dose = round(daily_total_ml / count, 2) if count else 0.0
         doses = [((i * 1440) // count, per_dose) for i in range(count)]
-        if days:
-            bit = {"Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6}
-            mask = 0x80 | sum(1 << bit[d] for d in days)
-        else:
-            state = self.coordinator.data
-            mask = state.day_mask if state and state.day_mask else 0xFF
-        await self.coordinator.async_dp_write_doses(doses, mask)
+        await self.coordinator.async_dp_write_doses(doses, self._resolve_day_mask(days))
+
+    async def async_service_set_doses(
+        self, doses: list[dict], days: list[str] | None = None
+    ) -> None:
+        """Write an explicit per-dose schedule — each entry a ``{time, ml}`` — on
+        the given days (or the current days). Order does not matter (sorted by
+        time here). Powers the card's per-dose grid and adjust-by-%."""
+        parsed = sorted(
+            (d["time"].hour * 60 + d["time"].minute, round(float(d["ml"]), 2))
+            for d in doses
+        )
+        await self.coordinator.async_dp_write_doses(parsed, self._resolve_day_mask(days))
