@@ -310,6 +310,7 @@ class DpState:
     dosing: bool = False
     last_dose_ml: float | None = None
     last_dose_at: datetime | None = None
+    manual_active: bool = False  # a manually-started dose/refill is cancelable now
 
     @property
     def reservoir_pct(self) -> float | None:

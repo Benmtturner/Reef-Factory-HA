@@ -122,7 +122,7 @@ class DpDosing(KhEntity, BinarySensorEntity):
         if state is None:
             return {}
         return {
-            "refill_active": bool(state.refill_total_ml),
+            "refill_active": bool(state.manual_active),
             "refill_total_ml": state.refill_total_ml,
             "refill_days": state.refill_days,
         }

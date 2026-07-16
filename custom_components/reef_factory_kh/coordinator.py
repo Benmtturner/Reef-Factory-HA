@@ -199,6 +199,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._dp_dosing = False
         self._dp_last_dose_ml: float | None = None
         self._dp_last_dose_at = None
+        # A manual dose/refill we initiated stays "cancelable" until the device
+        # goes idle again — lets the card show CANCEL for immediate doses too,
+        # without flipping on scheduled doses (which we did not start).
+        self._dp_manual_active = False
+        self._dp_manual_seen = False
 
     @property
     def model(self) -> str:
@@ -268,10 +273,14 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
 
     async def async_dp_manual_refill(self, amount_ml: float, days: int = 0) -> None:
         """Dose amount now (days=0) or spread over N days."""
+        self._dp_manual_active = True
+        self._dp_manual_seen = False
         await self._dp_send("dpManualRefill", "start", encode_dp_manual_refill(amount_ml, days))
 
     async def async_dp_stop_refill(self) -> None:
         """Cancel the active/pending manual refill."""
+        self._dp_manual_active = False
+        self._dp_manual_seen = False
         await self._dp_send("dpManualRefill", "stop", b"\x00")
 
     async def async_dp_skip_next(self, percent: int) -> None:
@@ -500,6 +509,20 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                 )
         # pH/server/alert/calibration frames carry no entity data yet; ignored.
 
+    def _dp_track_manual(self, dosing: bool, refill_total_ml: float | None) -> bool:
+        """Keep the 'manual dose/refill in progress' flag current and return the
+        cancelable signal: True while an action we started is running, or while
+        the device reports any pending refill (including one set from the app);
+        clears once our action has run and the device is idle again."""
+        running = dosing or bool(refill_total_ml)
+        if self._dp_manual_active:
+            if running:
+                self._dp_manual_seen = True
+            elif self._dp_manual_seen:
+                self._dp_manual_active = False
+                self._dp_manual_seen = False
+        return self._dp_manual_active or bool(refill_total_ml)
+
     def _handle_dp(self, frame) -> None:
         """Doser frames: settings (level + schedule), status (live), dose."""
         if frame.command == "dpRefresh" and frame.subcommand == "settings":
@@ -514,13 +537,18 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                     dosing=self._dp_dosing,
                     last_dose_ml=self._dp_last_dose_ml,
                     last_dose_at=self._dp_last_dose_at,
+                    manual_active=self._dp_track_manual(self._dp_dosing, state.refill_total_ml),
                 )
             )
         elif frame.command == "dpRefresh" and frame.subcommand == "status":
             level, dosing = decode_dp_status(frame.payload)
             self._dp_dosing = dosing
             if self.data is not None:
-                patch: dict = {"dosing": dosing}
+                refill = self.data.refill_total_ml
+                patch: dict = {
+                    "dosing": dosing,
+                    "manual_active": self._dp_track_manual(dosing, refill),
+                }
                 if level is not None:
                     patch["container_ml"] = level
                 self.async_set_updated_data(replace(self.data, **patch))
