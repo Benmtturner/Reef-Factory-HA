@@ -262,10 +262,12 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         return str(int(dt_util.utcnow().timestamp() * 1000))
 
     async def _dp_send(self, command: str, subcommand: str, payload: bytes = b"\x00") -> None:
+        # Send the command only. We deliberately do NOT poke the device with an
+        # immediate dpGet/settings afterwards: these are small ESP units with very
+        # limited concurrent connections, and firing a second frame right after a
+        # write (while the app/cloud may also be connected) can drop or crash them.
+        # The device pushes a fresh settings frame on change, so HA still updates.
         await self.async_send(command, subcommand, payload, self._dp_ident())
-        ws = self._ws
-        if ws is not None and not ws.closed and self.serial:
-            await ws.send_bytes(build_frame(self.serial, "dpGet", "settings"))
 
     async def async_dp_set_container(self, current_ml: float, capacity_ml: float) -> None:
         """Set reservoir level + capacity (e.g. after a refill)."""
@@ -308,9 +310,6 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         ident = self._dp_ident()
         await self.async_send("dpCalibration", "value", encode_dp_calibration_value(measured_ml), ident)
         await self.async_send("dpCalibration", "notification", encode_dp_calibration_notification(period_code), ident)
-        ws = self._ws
-        if ws is not None and not ws.closed and self.serial:
-            await ws.send_bytes(build_frame(self.serial, "dpGet", "settings"))
 
     def _persist(self, key: str, value: str) -> None:
         """Persist a value into the config entry (survives restarts)."""

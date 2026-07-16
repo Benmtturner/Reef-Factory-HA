@@ -70,7 +70,8 @@ class DpReservoirLevel(KhEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         state = self.coordinator.data
         capacity = state.capacity_ml if state and state.capacity_ml else value
-        await self.coordinator.async_dp_set_container(value, capacity)
+        # Contents can never exceed the container capacity.
+        await self.coordinator.async_dp_set_container(min(value, capacity), capacity)
 
 
 class DpCapacity(KhEntity, NumberEntity):
@@ -93,6 +94,9 @@ class DpCapacity(KhEntity, NumberEntity):
         return self.coordinator.data.capacity_ml if self.coordinator.data else None
 
     async def async_set_native_value(self, value: float) -> None:
+        # Capacity must be positive (0 makes the device's fill-% divide by zero)
+        # and never below the current contents.
+        capacity = max(1.0, value)
         state = self.coordinator.data
-        current = state.container_ml if state and state.container_ml else 0
-        await self.coordinator.async_dp_set_container(current, value)
+        current = min(state.container_ml if state and state.container_ml else 0, capacity)
+        await self.coordinator.async_dp_set_container(current, capacity)
