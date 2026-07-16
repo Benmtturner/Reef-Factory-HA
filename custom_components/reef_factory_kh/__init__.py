@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, FAMILY_DP, PLATFORMS
 from .coordinator import KhCoordinator
+from .panel import async_register_multi_reef_panel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +46,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: KhConfigEntry) -> bool:
     coordinator = KhCoordinator(hass, entry)
     await coordinator.async_start()
     entry.runtime_data = coordinator
+
+    # The Multi Reef console is available whenever the integration is set up.
+    await async_register_multi_reef_panel(hass)
 
     if coordinator.family == FAMILY_DP:
         await _async_register_card(hass)

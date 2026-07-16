@@ -1,7 +1,7 @@
 {
   "domain": "reef_factory_kh",
   "name": "Reef Factory",
-  "version": "0.8.3",
+  "version": "0.9.0",
   "codeowners": [
     "@Benmtturner"
   ],
@@ -17,7 +17,8 @@
   "integration_type": "device",
   "requirements": [],
   "dependencies": [
+    "frontend",
     "http",
-    "frontend"
+    "panel_custom"
   ]
 }
