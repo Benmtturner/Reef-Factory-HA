@@ -74,6 +74,13 @@ from .protocol import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# How often to pull a fresh doser settings frame so HA reflects edits made in the
+# RF app or on the device. The doser streams status/dose events live but does not
+# reliably push *settings* changes (schedule, container level, calibration), so we
+# reconcile on a timer. One small read per cycle — the device already streams
+# these frames unprompted, so it is far gentler than a post-write burst.
+DP_POLL_INTERVAL = 30
+
 
 def _describe(frame) -> str:
     """Best-effort one-line decode of a frame for the diagnostic log."""
@@ -401,6 +408,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._retry = 0
         if not self.mac:
             self.hass.async_create_task(self._learn_mac())
+        poll_task = (
+            self.hass.async_create_task(self._dp_poll_loop(ws))
+            if self.family == FAMILY_DP
+            else None
+        )
         try:
             await ws.send_bytes(build_frame(ZERO_SERIAL, "get", "config"))
 
@@ -428,9 +440,23 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                 ):
                     raise ConnectionError(f"socket closed ({msg.type.name})")
         finally:
+            if poll_task is not None:
+                poll_task.cancel()
             self._ws = None
             if not ws.closed:
                 await ws.close()
+
+    async def _dp_poll_loop(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        """Pull a fresh doser settings frame every DP_POLL_INTERVAL so HA stays in
+        sync with edits made in the RF app / on the device. One small read per
+        cycle; stops as soon as this socket is replaced or closed."""
+        try:
+            while not self._closing and self._ws is ws and not ws.closed:
+                await asyncio.sleep(DP_POLL_INTERVAL)
+                if self.serial and self._ws is ws and not ws.closed:
+                    await ws.send_bytes(build_frame(self.serial, "dpGet", "settings"))
+        except (asyncio.CancelledError, ConnectionResetError, aiohttp.ClientError, RuntimeError):
+            pass
 
     def _sniff(self, frame) -> None:
         """Diagnostic: log every distinct frame at WARNING (readable in the HA log).
