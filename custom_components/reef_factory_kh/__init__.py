@@ -21,7 +21,7 @@ type KhConfigEntry = ConfigEntry[KhCoordinator]
 CARD_URL = f"/{DOMAIN}/reef-factory-doser-card.js"
 _CARD_FILE = "frontend/reef-factory-doser-card.js"
 # Bump when the card JS changes so the browser reloads it (?v= cache-buster).
-CARD_VERSION = "0.8.3"
+CARD_VERSION = "0.9.1"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:

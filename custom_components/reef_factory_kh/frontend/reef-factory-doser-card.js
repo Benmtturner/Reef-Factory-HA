@@ -92,8 +92,9 @@ class ReefFactoryDoserCard extends HTMLElement {
     root.innerHTML = `
       <style>
         :host { --rf-blue:#3f8fd6; }
-        ha-card { padding:16px; }
-        .grid { display:grid; grid-template-columns:1fr auto 1fr; grid-template-areas:"today beaker dosing" "refill beaker calibrate"; gap:12px 18px; align-items:start; }
+        ha-card { padding:16px; box-sizing:border-box; overflow:hidden; }
+        .grid { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); grid-template-areas:"today beaker dosing" "refill beaker calibrate"; gap:14px 12px; align-items:start; }
+        .grid > div { min-width:0; }
         @media (max-width:460px) {
           .grid { grid-template-columns:1fr 1fr; grid-template-areas:"today dosing" "beaker beaker" "refill calibrate"; }
           .beaker { margin:6px 0; }
@@ -104,9 +105,9 @@ class ReefFactoryDoserCard extends HTMLElement {
         .refill { grid-area:refill; align-self:end; }
         .calibrate { grid-area:calibrate; align-self:end; text-align:right; }
         .label { color:var(--secondary-text-color); font-size:.75rem; letter-spacing:.06em; text-transform:uppercase; }
-        .big { color:var(--rf-blue); font-size:2.4rem; line-height:1.05; font-weight:300; }
-        .big small { font-size:1rem; font-weight:400; }
-        .sub { color:var(--secondary-text-color); font-size:.82rem; margin-top:6px; line-height:1.4; }
+        .big { color:var(--rf-blue); font-size:2rem; line-height:1.05; font-weight:300; overflow-wrap:anywhere; }
+        .big small { font-size:.95rem; font-weight:400; }
+        .sub { color:var(--secondary-text-color); font-size:.82rem; margin-top:6px; line-height:1.4; overflow-wrap:anywhere; }
         .sub b { color:var(--primary-text-color); }
         .link { color:var(--rf-blue); cursor:pointer; font-weight:600; font-size:.82rem; }
         .link:hover { text-decoration:underline; }
@@ -121,7 +122,7 @@ class ReefFactoryDoserCard extends HTMLElement {
         svg .cap { stroke:var(--rf-blue); stroke-width:7; }
         svg .fill { fill:var(--rf-blue); opacity:.4; transition:y .4s ease, height .4s ease; }
         svg .outline { fill:none; stroke:var(--rf-blue); stroke-width:2; }
-        .beaker-wrap { display:flex; align-items:stretch; gap:8px; }
+        .beaker-wrap { display:flex; align-items:stretch; gap:6px; }
         .cap-lbl { fill:var(--rf-blue); font-size:14px; }
         /* dialog — themed */
         .modal { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:9; }
@@ -152,7 +153,7 @@ class ReefFactoryDoserCard extends HTMLElement {
           <div class="beaker">
             <div class="beaker-wrap">
               <div class="sideL" id="sideL"></div>
-              <svg id="svg" width="150" height="300" viewBox="0 0 150 300"></svg>
+              <svg id="svg" width="112" height="240" viewBox="0 0 112 240"></svg>
               <div style="display:flex;align-items:center;">
                 <button class="btn" id="editBtn" style="padding:8px 14px;">EDIT</button>
               </div>
@@ -180,7 +181,7 @@ class ReefFactoryDoserCard extends HTMLElement {
   _drawBeaker() {
     const svg = this.shadowRoot.getElementById("svg");
     svg.innerHTML = "";
-    const x = 20, w = 105, top = 20, bot = 285;
+    const x = 14, w = 84, top = 14, bot = 228;
     const line = (x1, y1, x2, y2, cls) => {
       const l = document.createElementNS(NS, "line");
       l.setAttribute("x1", x1); l.setAttribute("y1", y1);
@@ -433,4 +434,4 @@ window.customCards.push({
   name: "Reef Factory Doser",
   description: "Control card for the Reef Factory single-head doser (RFDP).",
 });
-console.info("%c REEF-FACTORY-DOSER-CARD %c v0.8.3 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c REEF-FACTORY-DOSER-CARD %c v0.9.1 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
