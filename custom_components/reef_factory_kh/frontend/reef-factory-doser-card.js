@@ -409,11 +409,28 @@ class ReefFactoryDoserCard extends HTMLElement {
   }
 }
 
-customElements.define("reef-factory-doser-card", ReefFactoryDoserCard);
+// Some setups load a scoped-custom-element-registry polyfill (bundled by other
+// cards, e.g. universal-remote-card) that replaces window.customElements AFTER
+// we run, orphaning our early definition. Re-assert it across load phases — a
+// fresh subclass each time dodges "constructor already used" — so whichever
+// registry HA ends up querying has the element.
+const RF_TAG = "reef-factory-doser-card";
+const rfDefine = () => {
+  if (customElements.get(RF_TAG)) return;
+  try {
+    customElements.define(RF_TAG, class extends ReefFactoryDoserCard {});
+  } catch (_) {
+    /* already defined in this registry */
+  }
+};
+rfDefine();
+window.addEventListener("load", rfDefine);
+setTimeout(rfDefine, 1500);
+
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "reef-factory-doser-card",
   name: "Reef Factory Doser",
   description: "Control card for the Reef Factory single-head doser (RFDP).",
 });
-console.info("%c REEF-FACTORY-DOSER-CARD %c v0.8.2 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c REEF-FACTORY-DOSER-CARD %c v0.8.3 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
