@@ -372,7 +372,10 @@ def decode_dp_settings(payload: bytes, tz: tzinfo | None = None) -> DpState:
         manual = _u32(payload, rec + 4) / DP_SCALE
         timestamp = _dp_history_date(payload, rec + 8, tz)
         amount = manual if manual > 0 else scheduled
-        if amount <= 0 and timestamp is None:
+        # A real dose has a valid date and a sane volume. Skip empty records and,
+        # crucially, uninitialised/garbage ones (huge amounts, null dates) that the
+        # history region carries after a factory reset — they must not show as doses.
+        if timestamp is None or not 0 < amount <= 100000:
             continue
         history.append(DpDose(round(amount, 2), manual > 0, timestamp))
 

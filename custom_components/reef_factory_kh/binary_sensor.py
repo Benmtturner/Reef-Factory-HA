@@ -81,6 +81,14 @@ async def async_setup_entry(
             },
             "async_service_set_doses",
         )
+        platform.async_register_entity_service(
+            "set_container",
+            {
+                vol.Required("level"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                vol.Required("capacity"): vol.All(vol.Coerce(float), vol.Range(min=1)),
+            },
+            "async_service_set_container",
+        )
         return
 
     async_add_entities(
@@ -188,3 +196,10 @@ class DpDosing(KhEntity, BinarySensorEntity):
             for d in doses
         )
         await self.coordinator.async_dp_write_doses(parsed, self._resolve_day_mask(days))
+
+    async def async_service_set_container(self, level: float, capacity: float) -> None:
+        """Set contents + capacity in ONE write. Sending them as two separate
+        number writes raced — the capacity write read the stale contents and
+        overwrote the level just set — so the card's Edit dialog uses this."""
+        capacity = max(1.0, capacity)
+        await self.coordinator.async_dp_set_container(min(level, capacity), capacity)

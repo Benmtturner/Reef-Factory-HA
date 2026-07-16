@@ -117,6 +117,39 @@ set_schedule:
           multiple: true
           options: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
 
+set_container:
+  name: Set container
+  description: >-
+    Set the reservoir contents and capacity together in a single write (used by
+    the card's Edit dialog — setting them separately races and cancels out).
+  target:
+    entity:
+      integration: reef_factory_kh
+      domain: binary_sensor
+  fields:
+    level:
+      name: Contents
+      description: Current liquid in the container (mL).
+      required: true
+      example: 300
+      selector:
+        number:
+          min: 0
+          max: 20000
+          step: 1
+          unit_of_measurement: mL
+    capacity:
+      name: Capacity
+      description: Total container capacity (mL).
+      required: true
+      example: 400
+      selector:
+        number:
+          min: 1
+          max: 20000
+          step: 1
+          unit_of_measurement: mL
+
 set_doses:
   name: Set doses (per-dose schedule)
   description: >-

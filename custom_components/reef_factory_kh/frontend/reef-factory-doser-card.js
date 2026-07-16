@@ -342,16 +342,18 @@ class ReefFactoryDoserCard extends HTMLElement {
   _dlgEdit() {
     const host = this._modal(`
       <h3>Edit container</h3>
-      <label>Current value (ml)</label><input id="cur" type="number" min="0" value="${this._num("level") || 0}" />
-      <label>Capacity (ml)</label><input id="cap" type="number" min="0" value="${this._num("capacity") || 0}" />
-      <div class="row"><button class="btn red" id="save">SAVE</button><button class="btn" id="cancel">CANCEL</button></div>
+      <label>Current contents (ml)</label><input id="cur" type="number" min="0" value="${this._num("level") || 0}" />
+      <label>Capacity (ml)</label><input id="cap" type="number" min="1" value="${this._num("capacity") || 0}" />
+      <div class="row"><button class="btn red" id="save">SAVE</button><button class="btn ghost" id="cancel">CANCEL</button></div>
     `);
     host.querySelector("#cancel").onclick = () => this._close();
     host.querySelector("#save").onclick = () => {
-      const cur = parseFloat(host.querySelector("#cur").value);
-      const capv = parseFloat(host.querySelector("#cap").value);
-      if (this._e.levelNum && !isNaN(cur)) this._call("number", "set_value", { entity_id: this._e.levelNum, value: cur });
-      if (this._e.capacityNum && !isNaN(capv)) this._call("number", "set_value", { entity_id: this._e.capacityNum, value: capv });
+      const level = parseFloat(host.querySelector("#cur").value);
+      const capacity = parseFloat(host.querySelector("#cap").value);
+      // One combined write — two separate number sets race and cancel each other out.
+      if (!isNaN(level) && !isNaN(capacity)) {
+        this._call("reef_factory_kh", "set_container", { entity_id: this._refillTarget(), level, capacity });
+      }
       this._close();
     };
   }
@@ -622,4 +624,4 @@ window.customCards.push({
   name: "Reef Factory Doser",
   description: "Control card for the Reef Factory single-head doser (RFDP).",
 });
-console.info("%c REEF-FACTORY-DOSER-CARD %c v0.10.0 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c REEF-FACTORY-DOSER-CARD %c v0.10.3 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
