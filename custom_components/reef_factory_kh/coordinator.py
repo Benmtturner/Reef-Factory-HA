@@ -216,6 +216,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._dp_hist_task: asyncio.Task | None = None  # dose → refresh history
         self._dp_cooldown_until = 0.0  # loop-time writes wait until (post container write)
         self._dp_iface_event: asyncio.Event | None = None  # set on refresh/interface reply
+        self._dp_pending_container: tuple[float, float] | None = None  # optimistic hold
+        self._dp_pending_until = 0.0  # loop-time the optimistic container hold expires
         # A manual dose/refill we initiated stays "cancelable" until the device
         # goes idle again — lets the card show CANCEL for immediate doses too,
         # without flipping on scheduled doses (which we did not start).
@@ -293,9 +295,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
 
     async def async_dp_set_container(self, current_ml: float, capacity_ml: float) -> None:
         """Set reservoir level + capacity (e.g. after a refill)."""
-        # Reflect the new values immediately so the card updates the instant you
-        # save; the safe handshake+write runs below and the device's
-        # dpRefresh/container ACK confirms them a moment later.
+        # Reflect the new values immediately AND hold them: a status/settings frame
+        # arriving during the handshake below would otherwise clobber the card back
+        # to the device's pre-write value until the ACK lands seconds later.
+        self._dp_pending_container = (current_ml, capacity_ml)
+        self._dp_pending_until = self.hass.loop.time() + 8
         if self.data is not None:
             self.async_set_updated_data(
                 replace(self.data, container_ml=current_ml, capacity_ml=capacity_ml)
@@ -308,8 +312,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         if ws is not None and not ws.closed and self.serial:
             self._dp_iface_event = asyncio.Event()
             try:
-                await ws.send_bytes(build_frame(self.serial, "get", "interfaceVersion", "", b"\x00"))
-                await asyncio.wait_for(self._dp_iface_event.wait(), timeout=2)
+                await ws.send_bytes(build_frame(ZERO_SERIAL, "get", "interfaceVersion", "", b"\x00"))
+                await asyncio.wait_for(self._dp_iface_event.wait(), timeout=1.5)
             except (asyncio.TimeoutError, ConnectionResetError, aiohttp.ClientError):
                 pass
             finally:
@@ -614,6 +618,13 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                     )
                 )
         # pH/server/alert/calibration frames carry no entity data yet; ignored.
+
+    def _dp_container_hold(self, cur: float | None, cap: float | None) -> tuple:
+        """While an optimistic container write is pending, return the just-set
+        values so a pre-write status/settings frame doesn't revert the card."""
+        if self._dp_pending_container and self.hass.loop.time() < self._dp_pending_until:
+            return self._dp_pending_container
+        return (cur, cap)
 
     def _dp_track_manual(self, dosing: bool, refill_total_ml: float | None) -> bool:
         """Keep the 'manual dose/refill in progress' flag current and return the
