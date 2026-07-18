@@ -56,6 +56,7 @@ from .protocol import (
     KhState,
     build_frame,
     decode_config,
+    decode_dp_container,
     decode_dp_dose,
     decode_dp_settings,
     decode_dp_status,
@@ -214,6 +215,7 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._dp_last_dose_at = None
         self._dp_hist_task: asyncio.Task | None = None  # dose → refresh history
         self._dp_cooldown_until = 0.0  # loop-time writes wait until (post container write)
+        self._dp_iface_event: asyncio.Event | None = None  # set on refresh/interface reply
         # A manual dose/refill we initiated stays "cancelable" until the device
         # goes idle again — lets the card show CANCEL for immediate doses too,
         # without flipping on scheduled doses (which we did not start).
@@ -291,16 +293,22 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
 
     async def async_dp_set_container(self, current_ml: float, capacity_ml: float) -> None:
         """Set reservoir level + capacity (e.g. after a refill)."""
-        # The RF app sends a get/interfaceVersion immediately BEFORE its container
-        # write. Our byte-identical write reboots the device where the app's does
-        # not, and this handshake is the only observable difference — so mirror the
-        # app's exact pre-write sequence (get/handshake, then the write).
+        # Match the app EXACTLY: request get/interfaceVersion and WAIT for the
+        # device's refresh/interface reply before writing. Firing the write before
+        # the device has answered the handshake is what reboots it — the app always
+        # waits for that reply first.
         ws = self._ws
         if ws is not None and not ws.closed and self.serial:
-            await ws.send_bytes(build_frame(self.serial, "get", "interfaceVersion", "", b"\x00"))
+            self._dp_iface_event = asyncio.Event()
+            try:
+                await ws.send_bytes(build_frame(self.serial, "get", "interfaceVersion", "", b"\x00"))
+                await asyncio.wait_for(self._dp_iface_event.wait(), timeout=3)
+            except (asyncio.TimeoutError, ConnectionResetError, aiohttp.ClientError):
+                pass
+            finally:
+                self._dp_iface_event = None
         await self._dp_send("dpSet", "container", encode_dp_container(current_ml, capacity_ml))
-        # A container write may still bounce the device; briefly hold other commands
-        # so a follow-up (e.g. a manual dose) doesn't land mid-reboot.
+        # Small guard window so a follow-up command doesn't ride right behind it.
         self._dp_cooldown_until = self.hass.loop.time() + DP_WRITE_COOLDOWN
 
     async def async_dp_manual_refill(self, amount_ml: float, days: int = 0) -> None:
@@ -544,6 +552,13 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         if self.entry.options.get(CONF_LOG_FRAMES):
             self._sniff(frame)
 
+        # Reply to our pre-write get/interfaceVersion handshake — releases the
+        # container write (which waits for this so it doesn't reboot the device).
+        if frame.command == "refresh" and frame.subcommand == "interface":
+            if self._dp_iface_event is not None:
+                self._dp_iface_event.set()
+            return
+
         if frame.command == "refresh" and frame.subcommand == "config":
             config = decode_config(frame.payload)
             self.serial = config.serial
@@ -636,6 +651,15 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                 if level is not None:
                     patch["container_ml"] = level
                 self.async_set_updated_data(replace(self.data, **patch))
+        elif frame.command == "dpRefresh" and frame.subcommand == "container":
+            # ACK the device echoes right after a container write — apply it
+            # immediately so HA reflects the new values instantly (like the app),
+            # not at the next settings poll.
+            ack = decode_dp_container(frame.payload)
+            if ack is not None and self.data is not None:
+                self.async_set_updated_data(
+                    replace(self.data, container_ml=ack[0], capacity_ml=ack[1])
+                )
         elif frame.command == "dpRefresh" and frame.subcommand == "dose":
             vol = decode_dp_dose(frame.payload)
             if vol is not None:

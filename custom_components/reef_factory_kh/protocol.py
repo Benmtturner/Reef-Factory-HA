@@ -438,6 +438,14 @@ def decode_dp_dose(payload: bytes) -> float | None:
     return round(_u32(payload, 0) / DP_SCALE, 2)
 
 
+def decode_dp_container(payload: bytes) -> tuple[float, float] | None:
+    """Decode a dpRefresh/container ACK: (current mL, capacity mL). The device
+    echoes this right after a container write, so HA can update instantly."""
+    if len(payload) < 8:
+        return None
+    return round(_u32(payload, 0) / DP_SCALE, 2), round(_u32(payload, 4) / DP_SCALE, 2)
+
+
 # --- Command encoders (payloads for dp* uplink commands) -------------------
 
 
