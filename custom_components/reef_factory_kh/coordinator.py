@@ -293,6 +293,13 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
 
     async def async_dp_set_container(self, current_ml: float, capacity_ml: float) -> None:
         """Set reservoir level + capacity (e.g. after a refill)."""
+        # Reflect the new values immediately so the card updates the instant you
+        # save; the safe handshake+write runs below and the device's
+        # dpRefresh/container ACK confirms them a moment later.
+        if self.data is not None:
+            self.async_set_updated_data(
+                replace(self.data, container_ml=current_ml, capacity_ml=capacity_ml)
+            )
         # Match the app EXACTLY: request get/interfaceVersion and WAIT for the
         # device's refresh/interface reply before writing. Firing the write before
         # the device has answered the handshake is what reboots it — the app always
@@ -302,7 +309,7 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
             self._dp_iface_event = asyncio.Event()
             try:
                 await ws.send_bytes(build_frame(self.serial, "get", "interfaceVersion", "", b"\x00"))
-                await asyncio.wait_for(self._dp_iface_event.wait(), timeout=3)
+                await asyncio.wait_for(self._dp_iface_event.wait(), timeout=2)
             except (asyncio.TimeoutError, ConnectionResetError, aiohttp.ClientError):
                 pass
             finally:
