@@ -82,7 +82,7 @@ _LOGGER = logging.getLogger(__name__)
 DP_POLL_INTERVAL = 30
 # After a container write the device can bounce (rebooting to persist the value);
 # hold off other commands this long so we don't hit it mid-reboot and crash it.
-DP_WRITE_COOLDOWN = 6
+DP_WRITE_COOLDOWN = 2
 # A dose is a device-pushed event; pull fresh settings this soon after so today's
 # total / history reflect it quickly (the 30 s poll would otherwise be the lag).
 DP_DOSE_REFRESH_DELAY = 2
@@ -291,9 +291,16 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
 
     async def async_dp_set_container(self, current_ml: float, capacity_ml: float) -> None:
         """Set reservoir level + capacity (e.g. after a refill)."""
+        # The RF app sends a get/interfaceVersion immediately BEFORE its container
+        # write. Our byte-identical write reboots the device where the app's does
+        # not, and this handshake is the only observable difference — so mirror the
+        # app's exact pre-write sequence (get/handshake, then the write).
+        ws = self._ws
+        if ws is not None and not ws.closed and self.serial:
+            await ws.send_bytes(build_frame(self.serial, "get", "interfaceVersion", "", b"\x00"))
         await self._dp_send("dpSet", "container", encode_dp_container(current_ml, capacity_ml))
-        # Persisting a container change can reboot the device; hold other commands
-        # off briefly so a follow-up (e.g. a manual dose) doesn't hit it mid-reboot.
+        # A container write may still bounce the device; briefly hold other commands
+        # so a follow-up (e.g. a manual dose) doesn't land mid-reboot.
         self._dp_cooldown_until = self.hass.loop.time() + DP_WRITE_COOLDOWN
 
     async def async_dp_manual_refill(self, amount_ml: float, days: int = 0) -> None:

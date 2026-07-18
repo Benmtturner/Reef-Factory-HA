@@ -1,7 +1,7 @@
 {
   "domain": "reef_factory_kh",
   "name": "Reef Factory",
-  "version": "0.10.8",
+  "version": "0.10.9",
   "codeowners": [
     "@Benmtturner"
   ],
