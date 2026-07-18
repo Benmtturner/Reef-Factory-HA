@@ -313,7 +313,12 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
             self._dp_iface_event = asyncio.Event()
             try:
                 await ws.send_bytes(build_frame(ZERO_SERIAL, "get", "interfaceVersion", "", b"\x00"))
-                await asyncio.wait_for(self._dp_iface_event.wait(), timeout=1.5)
+                # The device never actually replies to this on our socket, so this
+                # always times out — its real job is just to space the handshake
+                # from the write so the device doesn't reboot. Keep it short: the
+                # device ACKs writes in ~9ms, so a small gap is ample, and it stops
+                # the write (and the app catching up) lagging by the old ~1.5s.
+                await asyncio.wait_for(self._dp_iface_event.wait(), timeout=0.5)
             except (asyncio.TimeoutError, ConnectionResetError, aiohttp.ClientError):
                 pass
             finally:
