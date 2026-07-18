@@ -404,7 +404,7 @@ def decode_dp_settings(payload: bytes, tz: tzinfo | None = None) -> DpState:
     # idle it can carry uninitialised/stale bytes. Reject implausible reads so a
     # garbage value can't masquerade as an active refill (and pin the card's
     # CANCEL button on). No real dosing refill is thousands of litres or > 1 year.
-    if refill_total > 100000 or not 0 <= refill_days <= 366:
+    if refill_total > 100000 or not 1 <= refill_days <= 366:
         refill_total, refill_days = 0.0, 0
 
     return DpState(

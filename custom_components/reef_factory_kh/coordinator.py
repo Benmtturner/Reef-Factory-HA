@@ -427,6 +427,12 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
 
         self._ws = ws
         self._retry = 0
+        # A fresh connection means nothing is mid-flight on the device (it may have
+        # just rebooted, e.g. after a container write) — reset the runtime flags so
+        # a stuck 'dosing'/CANCEL clears instead of surviving the reconnect.
+        self._dp_dosing = False
+        self._dp_manual_active = False
+        self._dp_manual_seen = False
         if not self.mac:
             self.hass.async_create_task(self._learn_mac())
         poll_task = (
