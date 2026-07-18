@@ -303,9 +303,14 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         await self._dp_send("dpManualRefill", "start", encode_dp_manual_refill(amount_ml, days))
 
     async def async_dp_stop_refill(self) -> None:
-        """Cancel the active/pending manual refill."""
+        """Cancel the active/pending manual refill/dose."""
         self._dp_manual_active = False
         self._dp_manual_seen = False
+        self._dp_dosing = False
+        # Revert the button/state right away — don't wait for a device frame, and
+        # don't force a settings re-read (which could momentarily bounce values).
+        if self.data is not None:
+            self.async_set_updated_data(replace(self.data, dosing=False, manual_active=False))
         await self._dp_send("dpManualRefill", "stop", b"\x00")
 
     async def async_dp_skip_next(self, percent: int) -> None:
@@ -615,15 +620,24 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
             if vol is not None:
                 self._dp_last_dose_ml = vol
                 self._dp_last_dose_at = dt_util.utcnow()
+                # A dose frame means that dose finished and the pump stopped. The
+                # device does NOT reliably send a dosing=off status afterwards, so
+                # 'dosing' would stick on and the manual CANCEL button never revert.
+                # Clear both here — a one-shot manual dose is done. (A multi-day
+                # refill keeps CANCEL via refill_total_ml.)
+                self._dp_dosing = False
+                self._dp_manual_active = False
+                self._dp_manual_seen = False
                 if self.data is not None:
                     self.async_set_updated_data(
                         replace(
                             self.data,
+                            dosing=False,
                             last_dose_ml=vol,
                             last_dose_at=self._dp_last_dose_at,
+                            manual_active=bool(self.data.refill_total_ml),
                         )
                     )
-                # The dose event is live, but today's-total/history live in the
-                # settings frame — pull a fresh one so they catch up in a couple
-                # seconds (manual and scheduled doses alike), not at the next poll.
+                # today's-total/history live in the settings frame — pull a fresh
+                # one so they catch up in a couple seconds, not at the next poll.
                 self._dp_refresh_after_dose()
