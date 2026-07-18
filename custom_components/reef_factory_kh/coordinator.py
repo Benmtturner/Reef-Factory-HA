@@ -295,36 +295,20 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
 
     async def async_dp_set_container(self, current_ml: float, capacity_ml: float) -> None:
         """Set reservoir level + capacity (e.g. after a refill)."""
-        # Reflect the new values immediately AND hold them: a status/settings frame
-        # arriving during the handshake below would otherwise clobber the card back
-        # to the device's pre-write value until the ACK lands seconds later.
+        # Reflect the new values immediately (the device ACKs with dpRefresh/container).
         self._dp_pending_container = (current_ml, capacity_ml)
         self._dp_pending_until = self.hass.loop.time() + 8
         if self.data is not None:
             self.async_set_updated_data(
                 replace(self.data, container_ml=current_ml, capacity_ml=capacity_ml)
             )
-        # Match the app EXACTLY: request get/interfaceVersion and WAIT for the
-        # device's refresh/interface reply before writing. Firing the write before
-        # the device has answered the handshake is what reboots it — the app always
-        # waits for that reply first.
-        ws = self._ws
-        if ws is not None and not ws.closed and self.serial:
-            self._dp_iface_event = asyncio.Event()
-            try:
-                await ws.send_bytes(build_frame(ZERO_SERIAL, "get", "interfaceVersion", "", b"\x00"))
-                # The device never actually replies to this on our socket, so this
-                # always times out — its real job is just to space the handshake
-                # from the write so the device doesn't reboot. Keep it short: the
-                # device ACKs writes in ~9ms, so a small gap is ample, and it stops
-                # the write (and the app catching up) lagging by the old ~1.5s.
-                await asyncio.wait_for(self._dp_iface_event.wait(), timeout=0.5)
-            except (asyncio.TimeoutError, ConnectionResetError, aiohttp.ClientError):
-                pass
-            finally:
-                self._dp_iface_event = None
+        # Send directly, exactly like the other dp commands (manual refill,
+        # calibration) — which the device applies instantly and broadcasts to the
+        # app in real time. The earlier interfaceVersion handshake was added to
+        # dodge a reboot, but those direct commands never reboot the device, so the
+        # container reboots had other causes (write+refresh burst / bad values)
+        # that are now fixed independently — the handshake only added app lag.
         await self._dp_send("dpSet", "container", encode_dp_container(current_ml, capacity_ml))
-        # Small guard window so a follow-up command doesn't ride right behind it.
         self._dp_cooldown_until = self.hass.loop.time() + DP_WRITE_COOLDOWN
 
     async def async_dp_manual_refill(self, amount_ml: float, days: int = 0) -> None:
