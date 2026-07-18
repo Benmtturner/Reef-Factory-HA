@@ -80,6 +80,12 @@ _LOGGER = logging.getLogger(__name__)
 # reconcile on a timer. One small read per cycle — the device already streams
 # these frames unprompted, so it is far gentler than a post-write burst.
 DP_POLL_INTERVAL = 30
+# After a container write the device can bounce (rebooting to persist the value);
+# hold off other commands this long so we don't hit it mid-reboot and crash it.
+DP_WRITE_COOLDOWN = 6
+# A dose is a device-pushed event; pull fresh settings this soon after so today's
+# total / history reflect it quickly (the 30 s poll would otherwise be the lag).
+DP_DOSE_REFRESH_DELAY = 2
 
 
 def _describe(frame) -> str:
@@ -206,6 +212,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._dp_dosing = False
         self._dp_last_dose_ml: float | None = None
         self._dp_last_dose_at = None
+        self._dp_hist_task: asyncio.Task | None = None  # dose → refresh history
+        self._dp_cooldown_until = 0.0  # loop-time writes wait until (post container write)
         # A manual dose/refill we initiated stays "cancelable" until the device
         # goes idle again — lets the card show CANCEL for immediate doses too,
         # without flipping on scheduled doses (which we did not start).
@@ -274,11 +282,19 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         # limited concurrent connections, and firing a second frame right after a
         # write (while the app/cloud may also be connected) can drop or crash them.
         # The device pushes a fresh settings frame on change, so HA still updates.
+        # A recent container write may have bounced the device — wait out the
+        # cooldown so this command doesn't land mid-reboot.
+        wait = self._dp_cooldown_until - self.hass.loop.time()
+        if wait > 0:
+            await asyncio.sleep(wait)
         await self.async_send(command, subcommand, payload, self._dp_ident())
 
     async def async_dp_set_container(self, current_ml: float, capacity_ml: float) -> None:
         """Set reservoir level + capacity (e.g. after a refill)."""
         await self._dp_send("dpSet", "container", encode_dp_container(current_ml, capacity_ml))
+        # Persisting a container change can reboot the device; hold other commands
+        # off briefly so a follow-up (e.g. a manual dose) doesn't hit it mid-reboot.
+        self._dp_cooldown_until = self.hass.loop.time() + DP_WRITE_COOLDOWN
 
     async def async_dp_manual_refill(self, amount_ml: float, days: int = 0) -> None:
         """Dose amount now (days=0) or spread over N days."""
@@ -458,6 +474,23 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         except (asyncio.CancelledError, ConnectionResetError, aiohttp.ClientError, RuntimeError):
             pass
 
+    def _dp_refresh_after_dose(self) -> None:
+        """A dose just fired — schedule one settings read so today's total/history
+        update promptly. Triggered by an inbound device event (not our own write),
+        so this read is safe. Debounced against bursts of dose frames."""
+        if self._dp_hist_task and not self._dp_hist_task.done():
+            self._dp_hist_task.cancel()
+        self._dp_hist_task = self.hass.async_create_task(self._dp_settings_after(DP_DOSE_REFRESH_DELAY))
+
+    async def _dp_settings_after(self, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+            ws = self._ws
+            if ws is not None and not ws.closed and self.serial:
+                await ws.send_bytes(build_frame(self.serial, "dpGet", "settings"))
+        except (asyncio.CancelledError, ConnectionResetError, aiohttp.ClientError, RuntimeError):
+            pass
+
     def _sniff(self, frame) -> None:
         """Diagnostic: log every distinct frame at WARNING (readable in the HA log).
 
@@ -590,3 +623,7 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                             last_dose_at=self._dp_last_dose_at,
                         )
                     )
+                # The dose event is live, but today's-total/history live in the
+                # settings frame — pull a fresh one so they catch up in a couple
+                # seconds (manual and scheduled doses alike), not at the next poll.
+                self._dp_refresh_after_dose()
