@@ -480,6 +480,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         try:
             while not self._closing and self._ws is ws and not ws.closed:
                 await asyncio.sleep(DP_POLL_INTERVAL)
+                # Stay quiet right after a container write — the device may be
+                # rebooting to persist it; don't poll into a bouncing unit.
+                wait = self._dp_cooldown_until - self.hass.loop.time()
+                if wait > 0:
+                    await asyncio.sleep(wait)
                 if self.serial and self._ws is ws and not ws.closed:
                     await ws.send_bytes(build_frame(self.serial, "dpGet", "settings"))
         except (asyncio.CancelledError, ConnectionResetError, aiohttp.ClientError, RuntimeError):
@@ -496,6 +501,9 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
     async def _dp_settings_after(self, delay: float) -> None:
         try:
             await asyncio.sleep(delay)
+            wait = self._dp_cooldown_until - self.hass.loop.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
             ws = self._ws
             if ws is not None and not ws.closed and self.serial:
                 await ws.send_bytes(build_frame(self.serial, "dpGet", "settings"))
