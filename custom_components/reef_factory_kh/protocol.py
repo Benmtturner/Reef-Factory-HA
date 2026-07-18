@@ -250,6 +250,13 @@ _DP_OFF_HISTORY = 0xE1        # dose history: N × [sched:u32][manual:u32][date:
 _DP_HISTORY_REC = 15
 _DP_OFF_DAYMASK = 0x23A       # day bitfield: bit0=Sun..bit6=Sat, bit7=enabled
 _DP_HISTORY_COUNT = (_DP_OFF_DAYMASK - _DP_OFF_HISTORY) // _DP_HISTORY_REC  # 23
+# The timetable is count×7B, so refill/history/day-mask all shift with the dose
+# count. The fixed offsets above are the count=24 baseline; decode derives the
+# live positions from the timetable end (0x25 + count·7). Hardcoding them was
+# only correct for a 24-dose schedule — with e.g. 12 doses everything moved 84B.
+_DP_TT_END_24 = _DP_OFF_TIMETABLE + 24 * _DP_TIMETABLE_REC   # 0xCD
+_DP_REFILL_GAP = _DP_OFF_REFILL - _DP_TT_END_24              # 13
+_DP_HISTORY_GAP = _DP_OFF_HISTORY - _DP_TT_END_24            # 20
 _DP_SETTINGS_MIN = 0x29       # need byte 0x28 for the per-dose u32
 _DP_STATUS_STATE = 8          # status state byte: 2 = dosing
 _DP_STATE_DOSING = 2
@@ -363,29 +370,35 @@ def decode_dp_settings(payload: bytes, tz: tzinfo | None = None) -> DpState:
         timetable.append((_u16(payload, off + 4), round(_u32(payload, off) / DP_SCALE, 2)))
         off += _DP_TIMETABLE_REC
 
+    # Refill, history and day-mask all follow the timetable, so their offsets move
+    # with the dose count (timetable ends at 0x25 + count·7).
+    tt_end = _DP_OFF_TIMETABLE + count * _DP_TIMETABLE_REC
+    refill_off = tt_end + _DP_REFILL_GAP
+    hist_off = tt_end + _DP_HISTORY_GAP
+    daymask_off = hist_off + _DP_HISTORY_COUNT * _DP_HISTORY_REC
+
     history: list[DpDose] = []
     for i in range(_DP_HISTORY_COUNT):
-        rec = _DP_OFF_HISTORY + i * _DP_HISTORY_REC
+        rec = hist_off + i * _DP_HISTORY_REC
         if rec + _DP_HISTORY_REC > len(payload):
             break
         scheduled = _u32(payload, rec) / DP_SCALE
         manual = _u32(payload, rec + 4) / DP_SCALE
         timestamp = _dp_history_date(payload, rec + 8, tz)
         amount = manual if manual > 0 else scheduled
-        # A real dose has a valid date and a sane volume. Skip empty records and,
-        # crucially, uninitialised/garbage ones (huge amounts, null dates) that the
-        # history region carries after a factory reset — they must not show as doses.
+        # A real dose has a valid date and a sane volume — skip empty records and,
+        # as a safety net, any still-uninitialised/garbage ones.
         if timestamp is None or not 0 < amount <= 100000:
             continue
         history.append(DpDose(round(amount, 2), manual > 0, timestamp))
 
-    day_mask = payload[_DP_OFF_DAYMASK] if len(payload) > _DP_OFF_DAYMASK else 0
+    day_mask = payload[daymask_off] if len(payload) > daymask_off else 0
     refill_total = (
-        round(_u32(payload, _DP_OFF_REFILL) / DP_SCALE, 2)
-        if len(payload) >= _DP_OFF_REFILL + 4 else 0.0
+        round(_u32(payload, refill_off) / DP_SCALE, 2)
+        if len(payload) >= refill_off + 4 else 0.0
     )
     refill_days = (
-        _u16(payload, _DP_OFF_REFILL + 4) if len(payload) >= _DP_OFF_REFILL + 6 else 0
+        _u16(payload, refill_off + 4) if len(payload) >= refill_off + 6 else 0
     )
     # The refill field is only meaningful while a manual refill is pending; when
     # idle it can carry uninitialised/stale bytes. Reject implausible reads so a
