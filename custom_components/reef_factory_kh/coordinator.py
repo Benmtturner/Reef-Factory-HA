@@ -58,6 +58,7 @@ from .protocol import (
     decode_config,
     decode_dp_container,
     decode_dp_dose,
+    decode_dp_manual_refill,
     decode_dp_settings,
     decode_dp_status,
     decode_settings,
@@ -218,6 +219,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         # (the authoritative counter only refreshes on settings frames).
         self._dp_settings_dosed: float | None = None
         self._dp_settings_container: float | None = None
+        # Live manual-refill progress (dispensed/target), for the card's popup.
+        # Set from the manualRefill frame, dispensed climbed off the container
+        # drop, cleared when the refill ends.
+        self._dp_refill_target: float | None = None
+        self._dp_refill_dispensed: float | None = None
         self._dp_hist_task: asyncio.Task | None = None  # dose → refresh history
         self._dp_cooldown_until = 0.0  # loop-time writes wait until (post container write)
         self._dp_iface_event: asyncio.Event | None = None  # set on refresh/interface reply
@@ -327,10 +333,20 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._dp_manual_active = False
         self._dp_manual_seen = False
         self._dp_dosing = False
+        self._dp_refill_target = None
+        self._dp_refill_dispensed = None
         # Revert the button/state right away — don't wait for a device frame, and
         # don't force a settings re-read (which could momentarily bounce values).
         if self.data is not None:
-            self.async_set_updated_data(replace(self.data, dosing=False, manual_active=False))
+            self.async_set_updated_data(
+                replace(
+                    self.data,
+                    dosing=False,
+                    manual_active=False,
+                    refill_dispensed_ml=None,
+                    refill_target_ml=None,
+                )
+            )
         await self._dp_send("dpManualRefill", "stop", b"\x00")
 
     async def async_dp_skip_next(self, percent: int) -> None:
@@ -453,6 +469,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._dp_dosing = False
         self._dp_manual_active = False
         self._dp_manual_seen = False
+        self._dp_refill_target = None
+        self._dp_refill_dispensed = None
         if not self.mac:
             self.hass.async_create_task(self._learn_mac())
         poll_task = (
@@ -655,6 +673,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
             # total off the live container drop until the next settings frame.
             self._dp_settings_dosed = state.dosed_today_ml
             self._dp_settings_container = state.container_ml
+            # A settings frame with dosing off means any manual refill has ended —
+            # drop the popup progress; otherwise carry the live values across.
+            if not state.dosing:
+                self._dp_refill_target = None
+                self._dp_refill_dispensed = None
             self.async_set_updated_data(
                 replace(
                     state,
@@ -662,6 +685,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                     last_dose_ml=self._dp_last_dose_ml,
                     last_dose_at=self._dp_last_dose_at,
                     manual_active=self._dp_track_manual(state.dosing, state.refill_total_ml),
+                    refill_dispensed_ml=self._dp_refill_dispensed,
+                    refill_target_ml=self._dp_refill_target,
                 )
             )
         elif frame.command == "dpRefresh" and frame.subcommand == "status":
@@ -687,6 +712,14 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                     ):
                         poured = max(0.0, self._dp_settings_container - level)
                         patch["dosed_today_ml"] = round(self._dp_settings_dosed + poured, 2)
+                        # Same live drop climbs the manual-refill popup's progress
+                        # (monotonic: never below what the device already reported).
+                        if self._dp_refill_target is not None:
+                            self._dp_refill_dispensed = max(
+                                self._dp_refill_dispensed or 0.0, round(poured, 2)
+                            )
+                            patch["refill_dispensed_ml"] = self._dp_refill_dispensed
+                            patch["refill_target_ml"] = self._dp_refill_target
                 self.async_set_updated_data(replace(self.data, **patch))
         elif frame.command == "dpRefresh" and frame.subcommand == "container":
             # ACK the device echoes right after a container write — apply it
@@ -696,6 +729,26 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
             if ack is not None and self.data is not None:
                 self.async_set_updated_data(
                     replace(self.data, container_ml=ack[0], capacity_ml=ack[1])
+                )
+        elif frame.command == "dpRefresh" and frame.subcommand == "manualRefill":
+            # Live manual-refill progress: [dispensed][target]. Drives the card's
+            # progress popup and marks the refill cancelable (app- or HA-started).
+            mr = decode_dp_manual_refill(frame.payload)
+            if mr is not None and self.data is not None:
+                dispensed, target = mr
+                self._dp_refill_target = target
+                self._dp_refill_dispensed = max(self._dp_refill_dispensed or 0.0, dispensed)
+                self._dp_dosing = True
+                self._dp_manual_active = True
+                self._dp_manual_seen = True
+                self.async_set_updated_data(
+                    replace(
+                        self.data,
+                        dosing=True,
+                        manual_active=True,
+                        refill_dispensed_ml=self._dp_refill_dispensed,
+                        refill_target_ml=self._dp_refill_target,
+                    )
                 )
         elif frame.command == "dpRefresh" and frame.subcommand == "dose":
             vol = decode_dp_dose(frame.payload)
@@ -710,6 +763,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                 self._dp_dosing = False
                 self._dp_manual_active = False
                 self._dp_manual_seen = False
+                self._dp_refill_target = None
+                self._dp_refill_dispensed = None
                 if self.data is not None:
                     self.async_set_updated_data(
                         replace(
@@ -718,6 +773,8 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                             last_dose_ml=vol,
                             last_dose_at=self._dp_last_dose_at,
                             manual_active=bool(self.data.refill_total_ml),
+                            refill_dispensed_ml=None,
+                            refill_target_ml=None,
                         )
                     )
                 # today's-total/history live in the settings frame — pull a fresh

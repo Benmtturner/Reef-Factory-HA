@@ -152,6 +152,8 @@ class DpDosing(KhEntity, BinarySensorEntity):
             "refill_active": bool(state.manual_active),
             "refill_total_ml": state.refill_total_ml,
             "refill_days": state.refill_days,
+            "refill_dispensed_ml": state.refill_dispensed_ml,
+            "refill_target_ml": state.refill_target_ml,
         }
 
     # Entity-service handlers (registered in async_setup_entry).

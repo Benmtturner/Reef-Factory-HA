@@ -318,6 +318,8 @@ class DpState:
     calibration_date: datetime | None = None
     refill_total_ml: float | None = None  # active multi-day manual refill
     refill_days: int = 0
+    refill_dispensed_ml: float | None = None  # live progress of an active manual refill
+    refill_target_ml: float | None = None  # target of an active manual refill (popup)
     dosed_today_ml: float | None = None  # device's running daily dose total (incl. partials)
     dosing: bool = False
     last_dose_ml: float | None = None
@@ -462,6 +464,14 @@ def decode_dp_dose(payload: bytes) -> float | None:
 def decode_dp_container(payload: bytes) -> tuple[float, float] | None:
     """Decode a dpRefresh/container ACK: (current mL, capacity mL). The device
     echoes this right after a container write, so HA can update instantly."""
+    if len(payload) < 8:
+        return None
+    return round(_u32(payload, 0) / DP_SCALE, 2), round(_u32(payload, 4) / DP_SCALE, 2)
+
+
+def decode_dp_manual_refill(payload: bytes) -> tuple[float, float] | None:
+    """Decode a dpRefresh/manualRefill frame (8 B): (dispensed mL, target mL).
+    Streamed while a manual refill runs — powers the live progress popup."""
     if len(payload) < 8:
         return None
     return round(_u32(payload, 0) / DP_SCALE, 2), round(_u32(payload, 4) / DP_SCALE, 2)
