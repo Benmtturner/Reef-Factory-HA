@@ -616,10 +616,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         return (cur, cap)
 
     def _dp_track_manual(self, dosing: bool, refill_total_ml: float | None) -> bool:
-        """Keep the 'manual dose/refill in progress' flag current and return the
-        cancelable signal: True while an action we started is running, or while
-        the device reports any pending refill (including one set from the app);
-        clears once our action has run and the device is idle again."""
+        """Return the 'cancelable dose in progress' signal that drives the card's
+        CANCEL button: True whenever the pump is actually dosing — a manual/app
+        refill OR a scheduled dose, both of which you can cancel — or a multi-day
+        refill is pending, or we started one. The device exposes no distinct
+        'manual' flag mid-dose, so an app-started refill is caught via live dosing."""
         running = dosing or bool(refill_total_ml)
         if self._dp_manual_active:
             if running:
@@ -627,7 +628,7 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
             elif self._dp_manual_seen:
                 self._dp_manual_active = False
                 self._dp_manual_seen = False
-        return self._dp_manual_active or bool(refill_total_ml)
+        return self._dp_manual_active or running
 
     def _handle_dp(self, frame) -> None:
         """Doser frames: settings (level + schedule), status (live), dose."""
