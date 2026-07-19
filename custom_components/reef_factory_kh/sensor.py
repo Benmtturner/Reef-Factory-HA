@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -300,7 +300,18 @@ class DpSensor(KhEntity, SensorEntity):
 
 
 class DpDosedToday(KhEntity, SensorEntity):
-    """Total volume actually dosed today (sum of today's history), with the log."""
+    """Volume actually dosed today, INCLUDING canceled/partial doses.
+
+    The device only logs *completed* doses to its history, but its running
+    ``dosed_since_refill_ml`` counter ticks up on every pour — partials included.
+    We accumulate that counter's rise since local midnight, so a canceled dose
+    still counts (matching the RF app), ignoring the downward jump when the
+    container is refilled. The ``logged_total`` attribute keeps the history-only
+    figure for reference.
+
+    State is in-memory: on an HA restart it re-baselines to today's logged total
+    (partials dosed before the restart are lost) and never reads below the log.
+    """
 
     _attr_name = "Dosed Today"
     _attr_native_unit_of_measurement = UNIT_ML
@@ -310,12 +321,11 @@ class DpDosedToday(KhEntity, SensorEntity):
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "dosed_today")
+        self._accum: float | None = None
+        self._prev_counter: float | None = None
+        self._day: date | None = None
 
-    @property
-    def native_value(self) -> float | None:
-        state = self.coordinator.data
-        if state is None:
-            return None
+    def _logged_today(self, state) -> float:
         today = dt_util.now().date()
         return round(
             sum(d.volume_ml for d in state.history if d.timestamp and d.timestamp.date() == today),
@@ -323,11 +333,41 @@ class DpDosedToday(KhEntity, SensorEntity):
         )
 
     @property
+    def native_value(self) -> float | None:
+        # Idempotent accumulation: re-processing the same frame is a no-op because
+        # _prev_counter advances to the value we just consumed (delta becomes 0).
+        state = self.coordinator.data
+        if state is None:
+            return round(self._accum, 2) if self._accum is not None else None
+        today = dt_util.now().date()
+        logged = self._logged_today(state)
+        counter = state.dosed_since_refill_ml
+        if self._day != today:
+            # New day or first run: baseline from today's logged doses.
+            self._day = today
+            self._accum = logged
+            self._prev_counter = counter
+        else:
+            if counter is not None and self._prev_counter is not None:
+                delta = counter - self._prev_counter
+                if delta > 0:  # a pour (incl. partials); ignore refill resets (<0)
+                    self._accum = (self._accum if self._accum is not None else logged) + delta
+                self._prev_counter = counter
+            elif counter is not None:
+                self._prev_counter = counter
+            # Floor: never read below the logged total (covers a mid-day refill
+            # reset, a missed delta, or the very first frame after startup).
+            if self._accum is None or self._accum < logged:
+                self._accum = logged
+        return round(self._accum, 2) if self._accum is not None else None
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         state = self.coordinator.data
         if state is None:
             return {}
         return {
+            "logged_total": self._logged_today(state),
             "history": [
                 {
                     "time": d.timestamp.isoformat() if d.timestamp else None,
@@ -335,7 +375,7 @@ class DpDosedToday(KhEntity, SensorEntity):
                     "type": "manual" if d.manual else "scheduled",
                 }
                 for d in state.history
-            ]
+            ],
         }
 
 
