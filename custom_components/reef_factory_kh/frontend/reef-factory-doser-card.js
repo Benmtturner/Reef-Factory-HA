@@ -139,8 +139,6 @@ class ReefFactoryDoserCard extends HTMLElement {
         .dialog { background:var(--ha-card-background,var(--card-background-color,#1f2226)); color:var(--primary-text-color); border-radius:10px; padding:22px; min-width:280px; max-width:min(92vw,420px); box-shadow:0 12px 44px rgba(0,0,0,.5); }
         .dialog h3 { margin:0 0 6px; text-align:center; }
         .dialog p { color:var(--secondary-text-color); text-align:center; margin:0 0 16px; font-size:.9rem; }
-        .rpbar { height:8px; border-radius:999px; background:var(--divider-color,#3a3a3a); overflow:hidden; margin:0 0 4px; }
-        .rpbar > i { display:block; height:100%; background:var(--rf-blue); border-radius:999px; transition:width .3s ease; }
         .dialog label { display:block; font-size:.78rem; color:var(--secondary-text-color); margin:10px 0 4px; }
         .dialog input, .dialog select { width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--divider-color,#555); border-radius:6px; font-size:1rem; background:var(--primary-background-color,#111); color:var(--primary-text-color); }
         .row { display:flex; gap:10px; margin-top:18px; } .row .btn { flex:1; }
@@ -331,27 +329,27 @@ class ReefFactoryDoserCard extends HTMLElement {
   _showRefillProgress(dispensed, target) {
     const sr = this.shadowRoot;
     const d = fmt(dispensed, 2), t = fmt(target, 2);
-    const pct = target > 0 ? Math.max(0, Math.min(100, (dispensed / target) * 100)) : 0;
-    if (sr.getElementById("rpBar")) {          // already open — refresh in place
+    if (sr.getElementById("rpD")) {             // already open — refresh in place
       sr.getElementById("rpD").textContent = d;
       sr.getElementById("rpT").textContent = t;
-      sr.getElementById("rpBar").style.width = pct + "%";
       return;
     }
     this._refillPopupOpen = true;
     const host = sr.getElementById("modalHost");
+    // Body text matches the app verbatim: "X.XX/YY.YY of liquid added." (no unit).
     host.innerHTML = `<div class="modal"><div class="dialog">
       <h3>Manual refill</h3>
-      <p><b id="rpD">${d}</b> / <span id="rpT">${t}</span> ml of liquid added.</p>
-      <div class="rpbar"><i id="rpBar" style="width:${pct}%"></i></div>
-      <div class="row"><button class="btn red wide" id="rpCancel">CANCEL</button></div>
+      <p><span id="rpD">${d}</span>/<span id="rpT">${t}</span> of liquid added.</p>
+      <div style="text-align:center;margin-top:16px">
+        <button class="btn red" id="rpCancel" style="min-width:150px">CANCEL</button>
+      </div>
     </div></div>`;
     host.querySelector("#rpCancel").onclick = () =>
       this._e.stopRefill && this._call("button", "press", { entity_id: this._e.stopRefill });
   }
   _closeRefillProgress() {
     this._refillPopupOpen = false;
-    if (this.shadowRoot.getElementById("rpBar")) this._close();
+    if (this.shadowRoot.getElementById("rpD")) this._close();
   }
 
   _refillTarget() {
@@ -663,4 +661,4 @@ window.customCards.push({
   name: "Reef Factory Doser",
   description: "Control card for the Reef Factory single-head doser (RFDP).",
 });
-console.info("%c REEF-FACTORY-DOSER-CARD %c v0.10.4 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c REEF-FACTORY-DOSER-CARD %c v0.10.5 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
