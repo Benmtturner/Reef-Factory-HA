@@ -213,6 +213,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._dp_dosing = False
         self._dp_last_dose_ml: float | None = None
         self._dp_last_dose_at = None
+        # Baselines from the last settings frame, used to interpolate the daily
+        # dose total LIVE off the streaming container level while a dose pours
+        # (the authoritative counter only refreshes on settings frames).
+        self._dp_settings_dosed: float | None = None
+        self._dp_settings_container: float | None = None
         self._dp_hist_task: asyncio.Task | None = None  # dose → refresh history
         self._dp_cooldown_until = 0.0  # loop-time writes wait until (post container write)
         self._dp_iface_event: asyncio.Event | None = None  # set on refresh/interface reply
@@ -645,6 +650,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
             # still clears here within ~1-2s instead of sticking on until the next
             # reconnect. Sync the cache so the status-frame path and CANCEL agree.
             self._dp_dosing = state.dosing
+            # Baseline for live interpolation: the authoritative daily total and
+            # container level, sampled together. Status frames then climb the
+            # total off the live container drop until the next settings frame.
+            self._dp_settings_dosed = state.dosed_today_ml
+            self._dp_settings_container = state.container_ml
             self.async_set_updated_data(
                 replace(
                     state,
@@ -665,6 +675,18 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                 }
                 if level is not None:
                     patch["container_ml"] = level
+                    # Climb the daily total LIVE while dosing: the counter itself
+                    # only updates on settings frames, but the pump drops the
+                    # container in real time, so add that drop to the last settings
+                    # baseline. Settles to the authoritative counter when the next
+                    # settings frame lands (dose end / poll).
+                    if (
+                        dosing
+                        and self._dp_settings_dosed is not None
+                        and self._dp_settings_container is not None
+                    ):
+                        poured = max(0.0, self._dp_settings_container - level)
+                        patch["dosed_today_ml"] = round(self._dp_settings_dosed + poured, 2)
                 self.async_set_updated_data(replace(self.data, **patch))
         elif frame.command == "dpRefresh" and frame.subcommand == "container":
             # ACK the device echoes right after a container write — apply it

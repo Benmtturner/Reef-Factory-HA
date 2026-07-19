@@ -305,7 +305,7 @@ class DpDosedToday(KhEntity, SensorEntity):
 
     _attr_name = "Dosed Today"
     _attr_native_unit_of_measurement = UNIT_ML
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:beaker-check-outline"
     _attr_suggested_display_precision = 2
 
