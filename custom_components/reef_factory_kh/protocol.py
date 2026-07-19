@@ -240,6 +240,7 @@ DP_DAY_NAMES = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")  # bit0..bit6
 _DP_OFF_CONTAINER = 0x00      # container level, u32
 _DP_OFF_CAPACITY = 0x04       # container capacity, u32
 _DP_OFF_CAL_DATE = 0x0D       # calibration date [day:u8][mon:u8][year:u16 BE]
+_DP_OFF_DOSED = 0x12          # dosed-since-refill counter, u32 (= last fill − container)
 _DP_OFF_DAILY_TOTAL = 0x16    # today's scheduled total, u32
 _DP_OFF_DOSE_COUNT = 0x24     # number of doses today, u8
 _DP_OFF_PER_DOSE = 0x25       # dose #0 volume (= start of timetable), u32
@@ -317,6 +318,7 @@ class DpState:
     calibration_date: datetime | None = None
     refill_total_ml: float | None = None  # active multi-day manual refill
     refill_days: int = 0
+    dosed_since_refill_ml: float | None = None  # running total dosed since last fill
     dosing: bool = False
     last_dose_ml: float | None = None
     last_dose_at: datetime | None = None
@@ -400,6 +402,13 @@ def decode_dp_settings(payload: bytes, tz: tzinfo | None = None) -> DpState:
     # only via a settings frame (no trailing dose-complete frame) still clears.
     dosing = len(payload) > _DP_STATUS_STATE and payload[_DP_STATUS_STATE] == _DP_STATE_DOSING
 
+    # Running "dosed since last container fill" counter (= last fill level −
+    # current container). Climbs on every pour including canceled partials, and
+    # zeroes when the container is refilled. This is the figure the RF app shows.
+    dosed_since_refill: float | None = round(_u32(payload, _DP_OFF_DOSED) / DP_SCALE, 2)
+    if not 0 <= dosed_since_refill <= 100000:  # guard uninitialised/garbage reads
+        dosed_since_refill = None
+
     day_mask = payload[daymask_off] if len(payload) > daymask_off else 0
     refill_total = (
         round(_u32(payload, refill_off) / DP_SCALE, 2)
@@ -427,6 +436,7 @@ def decode_dp_settings(payload: bytes, tz: tzinfo | None = None) -> DpState:
         calibration_date=_dp_date(payload, _DP_OFF_CAL_DATE, tz),
         refill_total_ml=refill_total or None,
         refill_days=refill_days,
+        dosed_since_refill_ml=dosed_since_refill,
         dosing=dosing,
     )
 

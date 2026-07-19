@@ -220,6 +220,15 @@ DP_SENSORS: tuple[DpSensorDescription, ...] = (
         value_fn=lambda s: s.daily_total_ml,
     ),
     DpSensorDescription(
+        key="dosed_since_refill",
+        name="Dosed Since Refill",
+        native_unit_of_measurement=UNIT_ML,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:beaker-plus-outline",
+        suggested_display_precision=2,
+        value_fn=lambda s: s.dosed_since_refill_ml,
+    ),
+    DpSensorDescription(
         key="dose_count",
         name="Number of Doses",
         state_class=SensorStateClass.MEASUREMENT,
