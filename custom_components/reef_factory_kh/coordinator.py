@@ -326,6 +326,24 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         """Dose amount now (days=0) or spread over N days."""
         self._dp_manual_active = True
         self._dp_manual_seen = False
+        # Immediate dose: show the progress popup optimistically — we already know
+        # the target, so don't wait for the device's first manualRefill frame (that
+        # round-trip lags a second or two, longer behind a write-cooldown). The
+        # live frames then climb 'dispensed'; a dosing-off frame clears it.
+        if days == 0 and amount_ml > 0:
+            self._dp_refill_target = amount_ml
+            self._dp_refill_dispensed = 0.0
+            self._dp_dosing = True
+            if self.data is not None:
+                self.async_set_updated_data(
+                    replace(
+                        self.data,
+                        dosing=True,
+                        manual_active=True,
+                        refill_dispensed_ml=0.0,
+                        refill_target_ml=amount_ml,
+                    )
+                )
         await self._dp_send("dpManualRefill", "start", encode_dp_manual_refill(amount_ml, days))
 
     async def async_dp_stop_refill(self) -> None:
