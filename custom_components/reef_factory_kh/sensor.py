@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -220,15 +220,6 @@ DP_SENSORS: tuple[DpSensorDescription, ...] = (
         value_fn=lambda s: s.daily_total_ml,
     ),
     DpSensorDescription(
-        key="dosed_since_refill",
-        name="Dosed Since Refill",
-        native_unit_of_measurement=UNIT_ML,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        icon="mdi:beaker-plus-outline",
-        suggested_display_precision=2,
-        value_fn=lambda s: s.dosed_since_refill_ml,
-    ),
-    DpSensorDescription(
         key="dose_count",
         name="Number of Doses",
         state_class=SensorStateClass.MEASUREMENT,
@@ -300,30 +291,26 @@ class DpSensor(KhEntity, SensorEntity):
 
 
 class DpDosedToday(KhEntity, SensorEntity):
-    """Volume actually dosed today, INCLUDING canceled/partial doses.
+    """Total volume dosed today, read straight from the device's own daily counter.
 
-    The device only logs *completed* doses to its history, but its running
-    ``dosed_since_refill_ml`` counter ticks up on every pour — partials included.
-    We accumulate that counter's rise since local midnight, so a canceled dose
-    still counts (matching the RF app), ignoring the downward jump when the
-    container is refilled. The ``logged_total`` attribute keeps the history-only
-    figure for reference.
-
-    State is in-memory: on an HA restart it re-baselines to today's logged total
-    (partials dosed before the restart are lost) and never reads below the log.
+    The device keeps a running daily dose total (resets ~midnight) that ticks up
+    on EVERY pour including canceled/partial doses — the same figure the RF app
+    shows as "TODAY". It is NOT container-derived (verified live: raising the
+    container level left it unchanged), so we just read it. The timestamped log
+    holds only *completed* doses, kept on the ``history``/``logged_total``
+    attributes for reference; it will read lower than the headline whenever a
+    dose was canceled mid-pour. Falls back to the logged sum if the counter reads
+    garbage.
     """
 
     _attr_name = "Dosed Today"
     _attr_native_unit_of_measurement = UNIT_ML
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:beaker-check-outline"
     _attr_suggested_display_precision = 2
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "dosed_today")
-        self._accum: float | None = None
-        self._prev_counter: float | None = None
-        self._day: date | None = None
 
     def _logged_today(self, state) -> float:
         today = dt_util.now().date()
@@ -334,32 +321,12 @@ class DpDosedToday(KhEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        # Idempotent accumulation: re-processing the same frame is a no-op because
-        # _prev_counter advances to the value we just consumed (delta becomes 0).
         state = self.coordinator.data
         if state is None:
-            return round(self._accum, 2) if self._accum is not None else None
-        today = dt_util.now().date()
-        logged = self._logged_today(state)
-        counter = state.dosed_since_refill_ml
-        if self._day != today:
-            # New day or first run: baseline from today's logged doses.
-            self._day = today
-            self._accum = logged
-            self._prev_counter = counter
-        else:
-            if counter is not None and self._prev_counter is not None:
-                delta = counter - self._prev_counter
-                if delta > 0:  # a pour (incl. partials); ignore refill resets (<0)
-                    self._accum = (self._accum if self._accum is not None else logged) + delta
-                self._prev_counter = counter
-            elif counter is not None:
-                self._prev_counter = counter
-            # Floor: never read below the logged total (covers a mid-day refill
-            # reset, a missed delta, or the very first frame after startup).
-            if self._accum is None or self._accum < logged:
-                self._accum = logged
-        return round(self._accum, 2) if self._accum is not None else None
+            return None
+        if state.dosed_today_ml is not None:
+            return state.dosed_today_ml
+        return self._logged_today(state)  # fallback if the counter read is bad
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
