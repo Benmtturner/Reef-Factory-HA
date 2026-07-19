@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.loader import async_get_integration
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -20,7 +21,8 @@ type KhConfigEntry = ConfigEntry[KhCoordinator]
 
 CARD_URL = f"/{DOMAIN}/reef-factory-doser-card.js"
 _CARD_FILE = "frontend/reef-factory-doser-card.js"
-# Bump when the card JS changes so the browser reloads it (?v= cache-buster).
+# Fallback only — the ?v= cache-buster tracks the integration (manifest) version
+# so every release reloads the card in the browser automatically.
 CARD_VERSION = "0.10.3"
 
 
@@ -31,11 +33,19 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     hass.data[key] = True
     card_path = Path(__file__).parent / _CARD_FILE
+    # Cache-bust the card on the integration version so a HACS update reloads it
+    # in the browser without a manual hard-refresh (the frontend counterpart of
+    # the restart every code update needs).
+    try:
+        integration = await async_get_integration(hass, DOMAIN)
+        version = str(integration.version) if integration.version else CARD_VERSION
+    except Exception:  # noqa: BLE001
+        version = CARD_VERSION
     try:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(CARD_URL, str(card_path), False)]
         )
-        add_extra_js_url(hass, f"{CARD_URL}?v={CARD_VERSION}")
+        add_extra_js_url(hass, f"{CARD_URL}?v={version}")
         _LOGGER.debug("Reef Factory doser card registered at %s", CARD_URL)
     except Exception:  # noqa: BLE001 — a card failure must never break the device
         _LOGGER.warning("Could not register the Reef Factory doser card", exc_info=True)
