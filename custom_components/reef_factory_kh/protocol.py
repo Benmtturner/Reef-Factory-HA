@@ -298,9 +298,12 @@ class DpDose:
 class DpState:
     """Decoded single-head doser state from a dpRefresh/settings frame.
 
-    ``dosing``/``last_dose_ml``/``last_dose_at`` are not in the settings frame;
-    the coordinator patches them from status/dose frames. Time-relative values
-    (dosed-today, next-dose) are computed by the entities, which have a clock.
+    ``dosing`` IS carried by the settings frame (byte 0x08, same as the status
+    frame) and is decoded here — it's the only signal the device gives for a
+    cancel/stop that isn't a completed dose. ``last_dose_ml``/``last_dose_at``
+    are not in this frame; the coordinator patches them from dose frames.
+    Time-relative values (dosed-today, next-dose) are computed by the entities,
+    which have a clock.
     """
 
     container_ml: float | None
@@ -392,6 +395,11 @@ def decode_dp_settings(payload: bytes, tz: tzinfo | None = None) -> DpState:
             continue
         history.append(DpDose(round(amount, 2), manual > 0, timestamp))
 
+    # Byte 0x08 is the live dosing flag in BOTH the status and settings frames
+    # (2 = actively dosing). Decode it here so a cancel/stop the device reports
+    # only via a settings frame (no trailing dose-complete frame) still clears.
+    dosing = len(payload) > _DP_STATUS_STATE and payload[_DP_STATUS_STATE] == _DP_STATE_DOSING
+
     day_mask = payload[daymask_off] if len(payload) > daymask_off else 0
     refill_total = (
         round(_u32(payload, refill_off) / DP_SCALE, 2)
@@ -419,6 +427,7 @@ def decode_dp_settings(payload: bytes, tz: tzinfo | None = None) -> DpState:
         calibration_date=_dp_date(payload, _DP_OFF_CAL_DATE, tz),
         refill_total_ml=refill_total or None,
         refill_days=refill_days,
+        dosing=dosing,
     )
 
 

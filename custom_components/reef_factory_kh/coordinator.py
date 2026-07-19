@@ -638,13 +638,20 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
             except (ValueError, IndexError) as err:
                 _LOGGER.debug("Bad dp settings frame from %s: %s", self.host, err)
                 return
+            # The settings frame carries the authoritative live dosing flag
+            # (byte 0x08). Honor it — the device pushes a fresh settings frame
+            # the instant dosing starts OR stops, so a cancel/stop that produces
+            # no dose-complete frame (e.g. an app-side cancel, or a stop mid-pour)
+            # still clears here within ~1-2s instead of sticking on until the next
+            # reconnect. Sync the cache so the status-frame path and CANCEL agree.
+            self._dp_dosing = state.dosing
             self.async_set_updated_data(
                 replace(
                     state,
-                    dosing=self._dp_dosing,
+                    dosing=state.dosing,
                     last_dose_ml=self._dp_last_dose_ml,
                     last_dose_at=self._dp_last_dose_at,
-                    manual_active=self._dp_track_manual(self._dp_dosing, state.refill_total_ml),
+                    manual_active=self._dp_track_manual(state.dosing, state.refill_total_ml),
                 )
             )
         elif frame.command == "dpRefresh" and frame.subcommand == "status":
