@@ -1,24 +1,26 @@
 // Multi Reef — Red Sea ReefDose card.
 //
-// A light-themed dosing card modelled on the ReefBeat app: a device header with a
-// heads on/off toggle, then one row per head (supplement, dosed/daily with a
-// progress bar, doses + days-left chips, a status bottle, Dose Now, and a schedule
-// toggle) plus an expandable settings drawer.
+// Modelled on the ReefBeat home card: a minimal surface — device name, a status
+// icon cluster, and one slim row per head (supplement · dosed/target · progress
+// bar with the purple manual "+Nml" overshoot · stock bottle). Everything else
+// (dose now, schedule, amounts, calibration-ish toggles) stays hidden until you
+// tap a head row.
 //
 // Config:  type: custom:reef-dose-card
-//          entity: <any entity of the ReefDose device>   (used to find its siblings)
+//          entity: <any entity of the ReefDose device>   (used to find siblings)
+//          theme: auto | light | dark        (auto follows the HA theme)
+//          settings: drawer | inline         (inline = head details start open)
 //
-// It resolves every sibling entity by the anchor's device_id, so one entity is
-// enough. Uses stock services only (switch/number/button) — no custom services.
+// Uses stock services only (switch/number/button) — no custom services.
 
 const TAG = "reef-dose-card";
 
 // Status-bottle colours, straight from the app's glossary.
 const STOCK_COLORS = {
   high: "#22c55e", // green
-  low: "#f59e0b", // orange
+  low: "#f4b312", // amber
   empty: "#ef4444", // red
-  no_auto_dose: "#2b7fff", // blue — automatic dosing off
+  no_auto_dose: "#2f7bf6", // blue — automatic dosing off
 };
 
 // Per-head entity roles: suffix (after `head_<n>_`) -> friendly key.
@@ -41,7 +43,7 @@ const HEAD_ROLES = {
   priming: "priming",
 };
 
-// Device-level roles: entity_id substring -> friendly key (order: specific first).
+// Device-level roles: entity_id substring -> friendly key.
 const DEVICE_ROLES = [
   ["automatic_dosing", "automaticDosing", "switch"],
   ["dosing_delay", "dosingDelay", "number"],
@@ -58,8 +60,9 @@ class ReefDoseCard extends HTMLElement {
     this._config = config;
     // theme: "auto" (follow HA dark mode) | "light" | "dark"
     this._theme = config.theme || "auto";
-    // settings: "drawer" (behind ⚙) | "inline" (always visible)
-    this._settingsMode = config.settings === "inline" ? "inline" : "drawer";
+    // settings: "inline" -> head details start expanded; "drawer" -> collapsed
+    this._startOpen = config.settings === "inline";
+    this._open = this._open || new Set();
     this._sig = null;
     this._update();
   }
@@ -71,7 +74,7 @@ class ReefDoseCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 4;
+    return 3;
   }
 
   set hass(hass) {
@@ -112,7 +115,6 @@ class ReefDoseCard extends HTMLElement {
       if (hit) this._device[key] = hit;
     }
 
-    // Per-head: group by the `head_<n>_` marker, map suffix -> role.
     const heads = {};
     for (const id of ids) {
       const m = id.match(/_head_(\d+)_(.+)$/);
@@ -123,6 +125,11 @@ class ReefDoseCard extends HTMLElement {
       (heads[n] = heads[n] || {})[role] = id;
     }
     this._heads = heads;
+
+    if (this._startOpen && !this._openInit) {
+      this._openInit = true;
+      Object.keys(heads).forEach((n) => this._open.add(Number(n)));
+    }
 
     this._name =
       (this._deviceId && hass.devices?.[this._deviceId]?.name_by_user) ||
@@ -141,14 +148,17 @@ class ReefDoseCard extends HTMLElement {
     const v = parseFloat(this._val(id));
     return isNaN(v) ? null : v;
   }
+  _attr(id, name) {
+    const s = this._st(id);
+    const v = s ? parseFloat(s.attributes?.[name]) : NaN;
+    return isNaN(v) ? null : v;
+  }
 
-  // Re-render only when something visible changed.
   _signature() {
     if (!this._heads) return "";
     const parts = [
       this._name,
       this._isDark() ? "d" : "l",
-      this._settingsMode,
       this._val(this._device.automaticDosing),
       this._val(this._device.battery),
     ];
@@ -158,6 +168,8 @@ class ReefDoseCard extends HTMLElement {
         n,
         this._val(h.supplement),
         this._val(h.dosedToday),
+        this._attr(h.dosedToday, "auto_ml"),
+        this._attr(h.dosedToday, "manual_ml"),
         this._val(h.dailyTarget),
         this._val(h.dosesPerDay),
         this._val(h.remainingDays),
@@ -198,9 +210,9 @@ class ReefDoseCard extends HTMLElement {
 
   _render() {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
-    const autoOn = this._val(this._device.automaticDosing) !== "off";
+    const headsOn = this._val(this._device.automaticDosing) !== "off";
     const battery = this._val(this._device.battery);
-    const batteryLow = battery && battery !== "normal" && battery !== "unknown";
+    const batteryLow = battery && battery !== "normal" && battery !== "unknown" && battery !== "unavailable";
 
     const headNums = Object.keys(this._heads)
       .map((n) => parseInt(n, 10))
@@ -210,17 +222,17 @@ class ReefDoseCard extends HTMLElement {
       <style>${this._css()}</style>
       <div class="card ${this._isDark() ? "dark" : ""}">
         <div class="head">
-          <div class="title">
-            <span class="dot ${autoOn ? "on" : "off"}"></span>
-            <span class="name">${this._name}</span>
-          </div>
-          <div class="head-right">
-            ${batteryLow ? `<span class="warn" title="RTC battery ${battery}">🪫</span>` : ""}
-            <button class="power ${autoOn ? "on" : "off"}" id="power" title="Automatic dosing">
-              ${autoOn ? "Dosing" : "Heads OFF"}
+          <div class="name">${this._esc(this._name)}</div>
+          <div class="icons">
+            <span class="chip" title="Connected"><ha-icon icon="mdi:wifi"></ha-icon></span>
+            ${batteryLow ? `<span class="batt" title="Backup battery ${this._esc(battery)}"><ha-icon icon="mdi:battery-remove-outline"></ha-icon></span>` : ""}
+            <button class="pwr ${headsOn ? "" : "off"}" id="power"
+              title="${headsOn ? "Automatic dosing on — click to switch heads off" : "Heads OFF — click to resume dosing"}">
+              <ha-icon icon="mdi:power"></ha-icon>
             </button>
           </div>
         </div>
+        ${headsOn ? "" : `<div class="offline">Head/s OFF</div>`}
         <div class="heads">
           ${headNums.map((n) => this._headRow(n)).join("")}
         </div>
@@ -232,59 +244,63 @@ class ReefDoseCard extends HTMLElement {
   _headRow(n) {
     const h = this._heads[n];
     const supp = this._val(h.supplement) || `Head ${n}`;
-    const dosed = this._num(h.dosedToday) ?? 0;
     const target = this._num(h.dailyTarget) ?? 0;
+    const total = this._num(h.dosedToday) ?? 0;
+    let auto = this._attr(h.dosedToday, "auto_ml");
+    let manual = this._attr(h.dosedToday, "manual_ml");
+    if (auto == null) auto = total; // older integration: no split available
+    if (manual == null) manual = 0;
+    const stock = this._val(h.stockLevel) || "no_auto_dose";
+    const color = STOCK_COLORS[stock] || STOCK_COLORS.no_auto_dose;
+    const pct = target > 0 ? Math.min(100, Math.round((auto / target) * 100)) : 0;
+    const open = this._open.has(n);
+
+    const schedOn = this._val(h.schedule) === "on";
     const doses = this._val(h.dosesPerDay) ?? "0";
     const days = this._val(h.remainingDays);
-    const stock = this._val(h.stockLevel) || "no_auto_dose";
     const container = this._num(h.container);
-    const schedOn = this._val(h.schedule) === "on";
-    const priming = this._val(h.priming) === "on";
-    const color = STOCK_COLORS[stock] || STOCK_COLORS.no_auto_dose;
-    const pct = target > 0 ? Math.min(100, Math.round((dosed / target) * 100)) : 0;
     const nextRaw = this._val(h.nextDose);
-    const next = nextRaw && !["unknown", "unavailable"].includes(nextRaw)
-      ? new Date(nextRaw).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      : "—";
+    const next =
+      nextRaw && !["unknown", "unavailable"].includes(nextRaw)
+        ? new Date(nextRaw).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : "—";
 
     return `
-      <div class="head-row" data-h="${n}">
-        <div class="hr-top">
-          <div class="supp">${supp}</div>
-          <div class="bottle" style="--c:${color}" title="${stock.replace(/_/g, " ")}"></div>
+      <div class="row" data-h="${n}">
+        <div class="hr" data-toggle="${n}" role="button" aria-expanded="${open}">
+          <div class="main">
+            <div class="line1">
+              <span class="supp">${this._esc(supp)}</span>
+              <span class="amounts"><b>${auto}</b><i>ml</i><em>/ ${target}ml</em></span>
+            </div>
+            <div class="bar">
+              <div class="auto" style="width:${pct}%"></div>
+              ${manual > 0 ? `<div class="manual"></div>` : ""}
+            </div>
+            ${manual > 0 ? `<div class="plus">+${manual}ml</div>` : ""}
+          </div>
+          <div class="bottle" style="--c:${color}" title="${this._esc(stock.replace(/_/g, " "))}"></div>
         </div>
-        <div class="hr-mid">
-          <span class="dosed">${dosed}<span class="unit">ml</span></span>
-          <span class="slash">/ ${target}ml</span>
-          <span class="next">⏰ ${next}</span>
-        </div>
-        <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
-        <div class="chips">
-          <span class="chip">💧 ${dosed} / ${doses} doses</span>
-          ${days != null ? `<span class="chip" style="--cc:${color}">🔋 ${days} days</span>` : ""}
-          ${container != null ? `<span class="chip">🧴 ${container}ml</span>` : ""}
-        </div>
-        <div class="actions">
-          <button class="dose" data-a="dose" data-h="${n}">Dose ${this._num(h.manualDose) ?? 5}ml</button>
-          <button class="tgl ${schedOn ? "on" : ""}" data-a="sched" data-h="${n}">
-            ${schedOn ? "Schedule on" : "Schedule off"}
-          </button>
-          ${this._settingsMode === "drawer" ? `<button class="link" data-a="more" data-h="${n}">⚙</button>` : ""}
-        </div>
-        <div class="drawer" data-drawer="${n}" ${this._settingsMode === "inline" ? "" : "hidden"}>
-          <label>Daily dose (ml)
-            <input type="number" step="0.1" value="${this._num(h.dailyDose) ?? ""}" data-in="dailyDose" data-h="${n}">
-          </label>
-          <label>Manual dose (ml)
-            <input type="number" step="0.1" value="${this._num(h.manualDose) ?? 5}" data-in="manualDose" data-h="${n}">
-          </label>
-          <label>Container (ml)
-            <input type="number" step="1" value="${container ?? ""}" data-in="container" data-h="${n}">
-          </label>
-          <div class="drawer-tgls">
+        <div class="detail" data-detail="${n}" ${open ? "" : "hidden"}>
+          <div class="chips">
+            <span class="c">⏰ ${next}</span>
+            <span class="c">💧 ${doses}/day</span>
+            ${days != null ? `<span class="c">🔋 ${days} days</span>` : ""}
+            ${container != null ? `<span class="c">🧴 ${container}ml</span>` : ""}
+          </div>
+          <div class="actions">
+            <button class="dose" data-a="dose" data-h="${n}">Dose ${this._num(h.manualDose) ?? 5}ml</button>
+            <button class="tgl ${schedOn ? "on" : ""}" data-a="sched" data-h="${n}">${schedOn ? "Schedule on" : "Schedule off"}</button>
+          </div>
+          <div class="inputs">
+            <label>Daily dose (ml)<input type="number" step="0.1" value="${this._num(h.dailyDose) ?? ""}" data-in="dailyDose" data-h="${n}"></label>
+            <label>Manual dose (ml)<input type="number" step="0.1" value="${this._num(h.manualDose) ?? 5}" data-in="manualDose" data-h="${n}"></label>
+            <label>Container (ml)<input type="number" step="1" value="${container ?? ""}" data-in="container" data-h="${n}"></label>
+          </div>
+          <div class="minor">
             <button class="tgl ${this._val(h.foodHead) === "on" ? "on" : ""}" data-a="food" data-h="${n}">🐠 Food head</button>
             <button class="tgl ${this._val(h.monitor) === "on" ? "on" : ""}" data-a="monitor" data-h="${n}">📊 Monitor</button>
-            <button class="tgl ${this._val(h.priming) === "on" ? "on" : ""}" data-a="prime" data-h="${n}">🚰 ${priming ? "Priming…" : "Prime"}</button>
+            <button class="tgl ${this._val(h.priming) === "on" ? "on" : ""}" data-a="prime" data-h="${n}">🚰 Prime</button>
           </div>
         </div>
       </div>`;
@@ -295,26 +311,41 @@ class ReefDoseCard extends HTMLElement {
     const power = root.getElementById("power");
     if (power) power.onclick = () => this._toggle(this._device.automaticDosing);
 
+    root.querySelectorAll("[data-toggle]").forEach((row) => {
+      row.onclick = () => {
+        const n = parseInt(row.dataset.toggle, 10);
+        const det = root.querySelector(`[data-detail="${n}"]`);
+        if (!det) return;
+        if (this._open.has(n)) {
+          this._open.delete(n);
+          det.hidden = true;
+          row.setAttribute("aria-expanded", "false");
+        } else {
+          this._open.add(n);
+          det.hidden = false;
+          row.setAttribute("aria-expanded", "true");
+        }
+      };
+    });
+
     root.querySelectorAll("button[data-a]").forEach((btn) => {
       const n = parseInt(btn.dataset.h, 10);
       const h = this._heads[n];
       const a = btn.dataset.a;
-      btn.onclick = () => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
         if (a === "dose") this._press(h.doseNow);
         else if (a === "sched") this._toggle(h.schedule);
         else if (a === "food") this._toggle(h.foodHead);
         else if (a === "monitor") this._toggle(h.monitor);
         else if (a === "prime") this._toggle(h.priming);
-        else if (a === "more") {
-          const d = root.querySelector(`[data-drawer="${n}"]`);
-          if (d) d.hidden = !d.hidden;
-        }
       };
     });
 
     root.querySelectorAll("input[data-in]").forEach((inp) => {
       const n = parseInt(inp.dataset.h, 10);
       const h = this._heads[n];
+      inp.onclick = (e) => e.stopPropagation();
       inp.onchange = () => {
         const v = parseFloat(inp.value);
         if (isNaN(v)) return;
@@ -325,67 +356,80 @@ class ReefDoseCard extends HTMLElement {
     });
   }
 
+  _esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])
+    );
+  }
+
   _css() {
     return `
-      :host { --blue:#2b7fff; --ink:#1a1d26; --muted:#8b90a0; --line:#eceef3; --bg:#f4f5f8; }
-      .card { background:#fff; border-radius:20px; padding:16px; color:var(--ink);
-        font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; box-shadow:0 6px 24px rgba(20,25,45,.08); }
-      .head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
-      .title { display:flex; align-items:center; gap:10px; }
-      .name { font-size:1.25rem; font-weight:800; letter-spacing:-.02em; }
-      .dot { width:10px; height:10px; border-radius:50%; }
-      .dot.on { background:var(--blue); box-shadow:0 0 0 4px rgba(43,127,255,.15); }
-      .dot.off { background:#ef4444; box-shadow:0 0 0 4px rgba(239,68,68,.15); }
-      .head-right { display:flex; align-items:center; gap:10px; }
-      .warn { font-size:1.1rem; }
-      .power { border:none; border-radius:999px; padding:8px 16px; font-weight:700; cursor:pointer; font-size:.85rem; }
-      .power.on { background:rgba(43,127,255,.12); color:var(--blue); }
-      .power.off { background:rgba(239,68,68,.12); color:#ef4444; }
-      .heads { display:flex; flex-direction:column; gap:12px; }
-      .head-row { border:1px solid var(--line); border-radius:16px; padding:14px; }
-      .hr-top { display:flex; align-items:center; justify-content:space-between; }
-      .supp { font-weight:800; font-size:1.05rem; }
-      .bottle { width:16px; height:24px; border-radius:4px 4px 5px 5px; background:var(--c);
-        position:relative; box-shadow:inset 0 0 0 2px rgba(0,0,0,.06); }
+      :host { --blue:#2b7fff; --purple:#c05cf7; --ink:#1a1d26; --muted:#8b90a0;
+              --track:#e8eaef; --chipbg:#f4f5f8; --line:#eceef3; }
+      .card { background:#fff; border-radius:24px; padding:20px 22px; color:var(--ink);
+        font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+        box-shadow:0 8px 28px rgba(20,25,45,.10); }
+      .head { display:flex; align-items:flex-start; justify-content:space-between; }
+      .name { font-size:1.45rem; font-weight:800; letter-spacing:-.02em; }
+      .icons { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+      .chip { width:38px; height:38px; border-radius:50%; background:var(--chipbg);
+        display:flex; align-items:center; justify-content:center; color:var(--ink); }
+      .chip ha-icon, .batt ha-icon, .pwr ha-icon { --mdc-icon-size:20px; }
+      .batt { color:#ef4444; }
+      .pwr { background:none; border:none; cursor:pointer; padding:2px; color:var(--muted); }
+      .pwr.off { color:#ef4444; }
+      .offline { color:#ef4444; font-weight:800; margin:4px 0 0; }
+      .heads { display:flex; flex-direction:column; gap:20px; margin-top:18px; }
+      .row {}
+      .hr { display:flex; align-items:center; gap:14px; cursor:pointer; }
+      .main { flex:1; min-width:0; }
+      .line1 { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+      .supp { font-size:1.15rem; font-weight:600; }
+      .amounts b { font-size:1.5rem; font-weight:800; letter-spacing:-.02em;
+        font-variant-numeric:tabular-nums; }
+      .amounts i { font-style:normal; font-size:.85rem; font-weight:600; color:var(--muted); }
+      .amounts em { font-style:normal; font-size:.95rem; font-weight:600; color:var(--muted); margin-left:2px; }
+      .bar { position:relative; height:9px; border-radius:99px; background:var(--track);
+        overflow:hidden; margin-top:8px; }
+      .auto { position:absolute; left:0; top:0; bottom:0; background:var(--blue); border-radius:99px;
+        transition:width .4s ease; }
+      .manual { position:absolute; right:0; top:0; bottom:0; width:21%; background:var(--purple);
+        border-radius:99px; box-shadow:-3px 0 0 0 var(--track); }
+      .plus { text-align:right; color:var(--purple); font-weight:700; font-size:.9rem; margin-top:4px; }
+      .bottle { width:17px; height:26px; border-radius:4px 4px 5px 5px; background:var(--c);
+        position:relative; flex:0 0 auto; box-shadow:inset 0 0 0 2px rgba(0,0,0,.08); }
       .bottle::before { content:""; position:absolute; top:-5px; left:4px; right:4px; height:5px;
         background:var(--c); border-radius:2px 2px 0 0; }
-      .hr-mid { display:flex; align-items:baseline; gap:8px; margin:8px 0 6px; }
-      .dosed { font-size:1.5rem; font-weight:800; letter-spacing:-.03em; }
-      .unit { font-size:.85rem; font-weight:600; color:var(--muted); margin-left:1px; }
-      .slash { color:var(--muted); font-weight:600; }
-      .next { margin-left:auto; color:var(--muted); font-size:.85rem; font-weight:600; }
-      .bar { height:7px; border-radius:99px; background:var(--bg); overflow:hidden; }
-      .fill { height:100%; background:var(--blue); border-radius:99px; transition:width .4s ease; }
-      .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-      .chip { background:var(--bg); border-radius:10px; padding:6px 10px; font-size:.8rem; font-weight:600; color:#41465a; }
-      .actions { display:flex; gap:8px; margin-top:12px; align-items:center; }
+      .detail { margin-top:12px; padding:14px; border-radius:14px; background:var(--chipbg);
+        display:flex; flex-direction:column; gap:12px; }
+      .chips { display:flex; flex-wrap:wrap; gap:8px; }
+      .c { background:#fff; border-radius:10px; padding:6px 10px; font-size:.8rem; font-weight:600; color:#41465a; }
+      .actions { display:flex; gap:8px; }
       .dose { background:var(--blue); color:#fff; border:none; border-radius:12px; padding:10px 16px;
         font-weight:700; cursor:pointer; flex:1; font-size:.9rem; }
       .dose:hover { filter:brightness(1.05); }
       .tgl { background:#fff; border:1.5px solid var(--line); border-radius:12px; padding:9px 12px;
         font-weight:700; cursor:pointer; color:var(--muted); font-size:.82rem; }
       .tgl.on { border-color:var(--blue); color:var(--blue); background:rgba(43,127,255,.06); }
-      .link { background:none; border:none; cursor:pointer; font-size:1.1rem; padding:6px; color:var(--muted); }
-      .drawer { margin-top:12px; padding-top:12px; border-top:1px dashed var(--line);
-        display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-      .drawer label { display:flex; flex-direction:column; gap:4px; font-size:.75rem; font-weight:700; color:var(--muted); }
-      .drawer input { border:1.5px solid var(--line); border-radius:10px; padding:8px; font-size:.95rem; font-weight:600; }
-      .drawer input:focus { outline:none; border-color:var(--blue); }
-      .drawer-tgls { grid-column:1 / -1; display:flex; gap:8px; flex-wrap:wrap; }
+      .inputs { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+      .inputs label { display:flex; flex-direction:column; gap:4px; font-size:.72rem; font-weight:700; color:var(--muted); }
+      .inputs input { border:1.5px solid var(--line); border-radius:10px; padding:8px; font-size:.95rem;
+        font-weight:600; font-family:inherit; min-width:0; background:#fff; color:var(--ink); }
+      .inputs input:focus { outline:none; border-color:var(--blue); }
+      .minor { display:flex; gap:8px; flex-wrap:wrap; }
+      @media (max-width:420px) { .inputs { grid-template-columns:1fr 1fr; } }
 
-      /* --- dark theme (matched to ReefBeat: charcoal blocks on near-black, blue accent) --- */
-      .card.dark { --ink:#f4f6f8; --muted:#9aa0a8; --line:#363a42; --bg:#34383f; --blue:#2f7bf6;
-        background:#1b1d21; box-shadow:0 12px 32px rgba(0,0,0,.55); }
-      .card.dark .head-row { background:#2b2e34; border-color:#363a42; }
-      .card.dark .chip { background:#34383f; color:#c8cdd6; }
-      .card.dark .bar { background:#45494f; }
-      .card.dark .tgl { background:#2b2e34; border-color:#3d414a; color:#9aa0a8; }
-      .card.dark .tgl.on { background:rgba(47,123,246,.16); border-color:var(--blue); color:#8bb6ff; }
-      .card.dark .power.on { background:rgba(47,123,246,.18); color:#8bb6ff; }
-      .card.dark .power.off { background:rgba(229,72,77,.20); color:#ff8589; }
-      .card.dark .drawer { border-top-color:#363a42; }
-      .card.dark .drawer input { background:#24272d; border-color:#3d414a; color:var(--ink); }
-      .card.dark .link.active { color:#8bb6ff; }
+      /* --- dark: matched to the ReefBeat home card --- */
+      .card.dark { --ink:#f4f6f8; --muted:#9aa0a8; --track:#5a5e66; --chipbg:#34383f;
+        --line:#3d414a; --blue:#2f7bf6; background:#2b2e34;
+        box-shadow:0 12px 32px rgba(0,0,0,.5); }
+      .card.dark .chip { background:#3a3e46; color:#fff; }
+      .card.dark .c { background:#2b2e34; color:#c8cdd6; }
+      .card.dark .tgl { background:#2b2e34; }
+      .card.dark .tgl.on { background:rgba(47,123,246,.16); color:#8bb6ff; }
+      .card.dark .inputs input { background:#24272d; }
+      .card.dark .detail { background:#24272d; }
+      .card.dark .manual { box-shadow:-3px 0 0 0 #2b2e34; }
     `;
   }
 }

@@ -489,6 +489,7 @@ class RedSeaHeadSensorDescription(SensorEntityDescription):
     """Describes a per-head ReefDose sensor with a value extractor."""
 
     value_fn: Callable[[HeadState], StateType]
+    attrs_fn: Callable[[HeadState], dict[str, Any]] | None = None
 
 
 REDSEA_HEAD_SENSORS: tuple[RedSeaHeadSensorDescription, ...] = (
@@ -500,6 +501,12 @@ REDSEA_HEAD_SENSORS: tuple[RedSeaHeadSensorDescription, ...] = (
         icon="mdi:beaker-check-outline",
         suggested_display_precision=2,
         value_fn=lambda h: h.dosed_today_ml,
+        # The card splits scheduled progress from manual top-ups (the app shows
+        # manual doses as a separate purple "+Nml", not inside the bar).
+        attrs_fn=lambda h: {
+            "auto_ml": h.auto_dosed_today_ml,
+            "manual_ml": h.manual_dosed_today_ml,
+        },
     ),
     RedSeaHeadSensorDescription(
         key="daily_target",
@@ -553,6 +560,12 @@ class RedSeaHeadSensor(RedSeaHeadEntity, SensorEntity):
     def native_value(self) -> StateType:
         head = self._head_state
         return self.entity_description.value_fn(head) if head else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        head = self._head_state
+        fn = self.entity_description.attrs_fn
+        return fn(head) if (head and fn) else {}
 
 
 class RedSeaNextDoseSensor(RedSeaHeadEntity, SensorEntity):
