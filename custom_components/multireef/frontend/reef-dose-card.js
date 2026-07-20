@@ -390,11 +390,22 @@ class ReefDoseCard extends HTMLElement {
   }
 }
 
-// Some dashboards swap window.customElements after load; defining a fresh subclass
-// each time dodges "constructor already used" (mirrors the RF card).
-if (!customElements.get(TAG)) {
-  customElements.define(TAG, class extends ReefDoseCard {});
-}
+// Some setups load a scoped-custom-element-registry polyfill (bundled by other
+// cards, e.g. universal-remote-card) that replaces window.customElements AFTER
+// we run, orphaning our early definition. Re-assert it across load phases — a
+// fresh subclass each time dodges "constructor already used" — so whichever
+// registry HA ends up querying has the element (mirrors the RF card).
+const rdDefine = () => {
+  if (customElements.get(TAG)) return;
+  try {
+    customElements.define(TAG, class extends ReefDoseCard {});
+  } catch (_) {
+    /* already defined in this registry */
+  }
+};
+rdDefine();
+window.addEventListener("load", rdDefine);
+setTimeout(rdDefine, 1500);
 
 window.customCards = window.customCards || [];
 if (!window.customCards.some((c) => c.type === TAG)) {
