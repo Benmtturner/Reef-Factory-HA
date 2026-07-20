@@ -60,6 +60,7 @@ class EcoTechCoordinator(DataUpdateCoordinator[dict[str, DeviceRecord]]):
         except BridgeError as err:
             raise UpdateFailed(f"bridge {self.host} unreachable: {err}") from err
 
+        prev = self.data or {}
         records: dict[str, DeviceRecord] = {}
         for dev in devices:
             state: DeviceState | None = None
@@ -67,7 +68,12 @@ class EcoTechCoordinator(DataUpdateCoordinator[dict[str, DeviceRecord]]):
                 try:
                     state = await self.bridge.state(dev.mac)
                 except BridgeError as err:
+                    # A single connect-on-demand miss (pump briefly busy or the app
+                    # grabbed it) shouldn't flap the entity offline — carry the
+                    # last-known state forward until the next poll succeeds.
                     _LOGGER.debug("state read failed for %s: %s", dev.mac, err)
+                    prev_rec = prev.get(dev.identity)
+                    state = prev_rec.state if prev_rec else None
             records[dev.identity] = DeviceRecord(device=dev, state=state)
         return records
 

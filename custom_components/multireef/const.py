@@ -14,11 +14,13 @@ PLATFORMS: list[Platform] = [
 ]
 
 # EcoTech bridge entries use a different platform set: selects for scene + wave
-# mode, a number for speed, sensors for the bridge hub + per-device signal.
+# mode, a number for speed, sensors for the bridge hub + per-device signal, and
+# an update entity for OTA bridge firmware.
 ECOTECH_PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
+    Platform.UPDATE,
 ]
 
 # LAN WebSocket transport.

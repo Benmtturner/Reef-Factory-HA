@@ -10,6 +10,7 @@ from homeassistant.loader import async_get_integration
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     CONF_ENTRY_TYPE,
@@ -21,6 +22,7 @@ from .const import (
 )
 from .coordinator import KhCoordinator
 from .ecotech.coordinator import EcoTechCoordinator
+from .ecotech.entity import bridge_device_info
 from .panel import async_register_multi_reef_panel
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,6 +70,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = EcoTechCoordinator(hass, entry)
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
+        # Register the bridge hub device up front so child devices' via_device
+        # links resolve — platforms set up concurrently, so ordering can't ensure it.
+        dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id, **bridge_device_info(coordinator)
+        )
         await hass.config_entries.async_forward_entry_setups(entry, ECOTECH_PLATFORMS)
         return True
 

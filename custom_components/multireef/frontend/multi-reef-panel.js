@@ -35,6 +35,7 @@ class MultiReefPanel extends HTMLElement {
     this._hass = hass;
     if (!this._built) this._build();
     this._renderDevices();
+    this._renderBridges();
   }
   set narrow(v) {
     this._narrow = v;
@@ -154,6 +155,9 @@ class MultiReefPanel extends HTMLElement {
         <div class="sec-label">Your devices</div>
         <div id="devices" class="grid"></div>
 
+        <div class="sec-label" id="bridges-label" style="display:none">Bridges</div>
+        <div id="bridges" class="grid"></div>
+
         <div class="sec-label">Supported devices</div>
         <div id="support" class="support"></div>
       </div>
@@ -208,6 +212,82 @@ class MultiReefPanel extends HTMLElement {
     host.querySelectorAll("button[data-i]").forEach((b) => {
       b.onclick = () => this._openDialog(this._devices[Number(b.dataset.i)]);
     });
+  }
+
+  // ---- bridges: firmware over-the-air ----------------------------------------
+  // Surfaces the integration's bridge `update.*` entities so a firmware update is
+  // one click here, not a CLI command.
+  _findBridges() {
+    const hass = this._hass;
+    if (!hass) return [];
+    const out = [];
+    for (const entity_id of Object.keys(hass.states)) {
+      if (!entity_id.startsWith("update.")) continue;
+      const reg = hass.entities?.[entity_id];
+      if (!reg || reg.platform !== "multireef") continue;
+      const st = hass.states[entity_id];
+      const dev = reg.device_id && hass.devices ? hass.devices[reg.device_id] : undefined;
+      out.push({
+        entity_id,
+        name: (dev && (dev.name_by_user || dev.name)) || "Multi Reef Bridge",
+        installed: st.attributes.installed_version,
+        latest: st.attributes.latest_version,
+        updateAvailable: st.state === "on",
+        inProgress: !!st.attributes.in_progress,
+      });
+    }
+    return out;
+  }
+
+  _renderBridges() {
+    const host = this.$("bridges");
+    const label = this.$("bridges-label");
+    if (!host) return;
+    const bridges = this._findBridges();
+    const sig = bridges
+      .map((b) => [b.entity_id, b.installed, b.latest, b.updateAvailable, b.inProgress].join("|"))
+      .join(",");
+    if (sig === this._brSig) return;
+    this._brSig = sig;
+    this._bridges = bridges;
+    if (!bridges.length) {
+      host.innerHTML = "";
+      if (label) label.style.display = "none";
+      return;
+    }
+    if (label) label.style.display = "";
+    host.innerHTML = bridges
+      .map(
+        (b, i) => `
+        <div class="dev">
+          <div class="top">
+            <div class="ic"><ha-icon icon="mdi:access-point"></ha-icon></div>
+            <div style="min-width:0">
+              <div class="name">${this._esc(b.name)}</div>
+              <div class="brand">Firmware ${this._esc(b.installed || "?")}${
+          b.updateAvailable ? " → " + this._esc(b.latest) : ""
+        }</div>
+            </div>
+          </div>
+          <button class="btn${b.updateAvailable ? "" : " ghost"}" data-b="${i}" ${
+          b.updateAvailable && !b.inProgress ? "" : "disabled"
+        }>${b.inProgress ? "Updating…" : b.updateAvailable ? "Update firmware" : "Up to date"}</button>
+        </div>`
+      )
+      .join("");
+    host.querySelectorAll("button[data-b]").forEach((btn) => {
+      btn.onclick = () => this._updateBridge(this._bridges[Number(btn.dataset.b)]);
+    });
+  }
+
+  async _updateBridge(b) {
+    if (!b || !b.updateAvailable || b.inProgress) return;
+    try {
+      await this._hass.callService("update", "install", { entity_id: b.entity_id });
+      this._brSig = null; // let the next hass push reflect "Updating…"
+    } catch (e) {
+      /* HA surfaces the error toast */
+    }
   }
 
   // ---- provisioning dialog ----------------------------------------------------
@@ -393,4 +473,4 @@ class MultiReefPanel extends HTMLElement {
 if (!customElements.get("multi-reef-panel")) {
   customElements.define("multi-reef-panel", MultiReefPanel);
 }
-console.info("%c MULTI-REEF-PANEL %c v0.1.0 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c MULTI-REEF-PANEL %c v0.2.0 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");

@@ -138,3 +138,24 @@ class MobiusBridge:
 
     async def run_schedule(self, mac: str) -> None:
         await self._request("POST", f"/run?mac={mac}")
+
+    async def upload_firmware(self, data: bytes) -> None:
+        """OTA a new firmware image to the bridge (multipart POST /update).
+
+        The bridge flashes it and reboots, so this returns once the upload is
+        accepted; the new version shows up on the next poll of /health.
+        """
+        form = aiohttp.FormData()
+        form.add_field(
+            "firmware", data, filename="mobius_bridge.bin",
+            content_type="application/octet-stream",
+        )
+        timeout = aiohttp.ClientTimeout(total=120)  # a ~1 MB image over Wi-Fi
+        async with self._lock:
+            try:
+                async with self._session.post(
+                    f"{self._base}/update", data=form, timeout=timeout
+                ) as resp:
+                    resp.raise_for_status()
+            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                raise BridgeError(f"firmware upload failed: {err}") from err

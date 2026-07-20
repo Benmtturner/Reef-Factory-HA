@@ -10,6 +10,11 @@ MANUFACTURER = "EcoTech Marine"
 DEFAULT_BRIDGE_HOST = "multireef.local"
 UPDATE_INTERVAL = 60  # seconds — a poll briefly connects to each pump over BLE
 
+# Version of the bridge firmware bundled at firmware/mobius_bridge.bin. The update
+# entity offers this to any bridge running an older fw (compared to its /health).
+# Keep in lockstep with FW_VERSION in mobius/mobius_bridge/mobius_bridge.ino.
+BRIDGE_FW_VERSION = "0.1.2"
+
 # Advert manufacturer-data type byte → model. Only 0x0B is confirmed so far; the
 # rest of the user's fleet is unmapped (ID them by reading the device-name attr).
 TYPE_MP10 = 0x0B
