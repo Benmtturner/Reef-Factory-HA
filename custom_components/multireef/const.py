@@ -13,6 +13,14 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,
 ]
 
+# EcoTech bridge entries use a different platform set: selects for scene + wave
+# mode, a number for speed, sensors for the bridge hub + per-device signal.
+ECOTECH_PLATFORMS: list[Platform] = [
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SENSOR,
+]
+
 # LAN WebSocket transport.
 WS_PATH = "controler"  # single-l typo is hardcoded in the device firmware
 WS_SUBPROTOCOL = "arduino"
@@ -46,6 +54,13 @@ CONF_SERIAL = "serial_number"
 CONF_FIRMWARE = "firmware_version"
 CONF_MAC = "mac"
 CONF_FAMILY = "family"
+
+# Config-entry kinds — this umbrella now hosts more than Reef Factory. The
+# original RF-device entries carry no marker (treated as a device); EcoTech
+# bridge entries set CONF_ENTRY_TYPE so __init__/config-flow can branch.
+CONF_ENTRY_TYPE = "entry_type"
+ENTRY_TYPE_ECOTECH_BRIDGE = "ecotech_bridge"
+CONF_BRIDGE_HOST = "bridge_host"
 
 PONG_TIMEOUT = 10  # seconds — drop the connection if a ping gets no response
 

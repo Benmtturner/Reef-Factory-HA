@@ -11,8 +11,16 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, FAMILY_DP, PLATFORMS
+from .const import (
+    CONF_ENTRY_TYPE,
+    DOMAIN,
+    ECOTECH_PLATFORMS,
+    ENTRY_TYPE_ECOTECH_BRIDGE,
+    FAMILY_DP,
+    PLATFORMS,
+)
 from .coordinator import KhCoordinator
+from .ecotech.coordinator import EcoTechCoordinator
 from .panel import async_register_multi_reef_panel
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,25 +59,35 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         _LOGGER.warning("Could not register the Reef Factory doser card", exc_info=True)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: KhConfigEntry) -> bool:
-    """Set up a Reef Factory device from a config entry."""
-    coordinator = KhCoordinator(hass, entry)
-    await coordinator.async_start()
-    entry.runtime_data = coordinator
-
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up a Multi Reef entry — a Reef Factory device or an EcoTech bridge."""
     # The Multi Reef console is available whenever the integration is set up.
     await async_register_multi_reef_panel(hass)
 
+    if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_ECOTECH_BRIDGE:
+        coordinator = EcoTechCoordinator(hass, entry)
+        await coordinator.async_config_entry_first_refresh()
+        entry.runtime_data = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, ECOTECH_PLATFORMS)
+        return True
+
+    # Reef Factory device (the original path).
+    coordinator = KhCoordinator(hass, entry)
+    await coordinator.async_start()
+    entry.runtime_data = coordinator
     if coordinator.family == FAMILY_DP:
         await _async_register_card(hass)
-
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: KhConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        await entry.runtime_data.async_stop()
+    coordinator = entry.runtime_data
+    platforms = (
+        ECOTECH_PLATFORMS if isinstance(coordinator, EcoTechCoordinator) else PLATFORMS
+    )
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
+    if unload_ok and isinstance(coordinator, KhCoordinator):
+        await coordinator.async_stop()
     return unload_ok

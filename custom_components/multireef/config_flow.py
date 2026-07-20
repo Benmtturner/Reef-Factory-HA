@@ -18,20 +18,26 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.const import CONF_HOST, CONF_NAME
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .const import (
+    CONF_BRIDGE_HOST,
+    CONF_ENTRY_TYPE,
     CONF_FAMILY,
     CONF_FIRMWARE,
     CONF_LOG_FRAMES,
     CONF_MAC,
     CONF_SERIAL,
+    ENTRY_TYPE_ECOTECH_BRIDGE,
     MODELS,
     DOMAIN,
 )
 from .coordinator import async_probe, async_scan
+from .ecotech.bridge import MobiusBridge
+from .ecotech.const import DEFAULT_BRIDGE_HOST
 from .protocol import DeviceConfig, detect_family
 
 
@@ -41,6 +47,13 @@ def _model_for(serial: str) -> str:
     return MODELS.get(family, "Device") if family else "Device"
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def _probe_bridge(hass: HomeAssistant, host: str) -> dict:
+    """Validate a Multi Reef bridge is reachable by reading /health."""
+    bridge = MobiusBridge(async_get_clientsession(hass), host)
+    return await bridge.health()
+
 
 MANUAL = "__manual__"
 
@@ -83,6 +96,15 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Pick what to add: a Reef Factory device or an EcoTech bridge."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["reef_factory", "bridge"],
+        )
+
+    async def async_step_reef_factory(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Scan the network, then pick a device or fall back to manual entry."""
         found = await async_scan(self.hass)
 
@@ -95,6 +117,36 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._discovered:
             return await self.async_step_pick()
         return await self.async_step_manual()
+
+    async def async_step_bridge(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add an EcoTech bridge by address (defaults to multireef.local)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            host = user_input[CONF_BRIDGE_HOST].strip()
+            try:
+                await _probe_bridge(self.hass, host)
+            except Exception:  # noqa: BLE001 — surfaced as a form error
+                _LOGGER.exception("Failed to reach bridge %s", host)
+                errors["base"] = "cannot_connect"
+            else:
+                await self.async_set_unique_id(f"bridge_{host}")
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title="Multi Reef Bridge",
+                    data={
+                        CONF_ENTRY_TYPE: ENTRY_TYPE_ECOTECH_BRIDGE,
+                        CONF_BRIDGE_HOST: host,
+                    },
+                )
+        return self.async_show_form(
+            step_id="bridge",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_BRIDGE_HOST, default=DEFAULT_BRIDGE_HOST): str}
+            ),
+            errors=errors,
+        )
 
     async def async_step_pick(
         self, user_input: dict[str, Any] | None = None

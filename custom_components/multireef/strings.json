@@ -1,6 +1,20 @@
 {
   "config": {
     "step": {
+      "user": {
+        "title": "Add to Multi Reef",
+        "menu_options": {
+          "reef_factory": "Reef Factory device (KH Keeper, doser)",
+          "bridge": "EcoTech bridge (VorTech, Radion…)"
+        }
+      },
+      "bridge": {
+        "title": "Add EcoTech bridge",
+        "description": "Enter the Multi Reef bridge's address. Leave the default if you flashed it as multireef.local.",
+        "data": {
+          "bridge_host": "Bridge address (host or IP)"
+        }
+      },
       "pick": {
         "title": "Select your device",
         "description": "These Reef Factory devices were found on your network. Pick one, or choose manual entry.",

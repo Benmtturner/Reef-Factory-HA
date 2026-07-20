@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import KhConfigEntry
 from .const import FAMILY_DP, FAMILY_KH, UNIT_ML
+from .ecotech.coordinator import EcoTechCoordinator
+from .ecotech.entity import EcoTechDeviceEntity
 from .entity import KhEntity
 
 
@@ -19,6 +21,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up numbers for whichever device family this entry is."""
     coordinator = entry.runtime_data
+    if isinstance(coordinator, EcoTechCoordinator):
+        async_add_entities(
+            EcoTechSpeedNumber(coordinator, device)
+            for device in coordinator.controllable_devices()
+        )
+        return
     if coordinator.family == FAMILY_DP:
         async_add_entities([DpReservoirLevel(coordinator), DpCapacity(coordinator)])
         return
@@ -100,3 +108,26 @@ class DpCapacity(KhEntity, NumberEntity):
         state = self.coordinator.data
         current = min(state.container_ml if state and state.container_ml else 0, capacity)
         await self.coordinator.async_dp_set_container(current, capacity)
+
+
+class EcoTechSpeedNumber(EcoTechDeviceEntity, NumberEntity):
+    """Wave pump speed, 0–100% (read-modify-write of the 0x197 program)."""
+
+    _attr_name = "Speed"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_mode = NumberMode.SLIDER
+    _attr_icon = "mdi:speedometer"
+
+    def __init__(self, coordinator: EcoTechCoordinator, device) -> None:
+        super().__init__(coordinator, device, "speed")
+
+    @property
+    def native_value(self) -> float | None:
+        state = self._state
+        return state.speed if state and state.speed >= 0 else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_speed(self._identity, int(round(value)))

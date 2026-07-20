@@ -21,6 +21,8 @@ from homeassistant.util import dt as dt_util
 
 from . import KhConfigEntry
 from .const import FAMILY_DP, UNIT_DKH, UNIT_ML
+from .ecotech.coordinator import EcoTechCoordinator
+from .ecotech.entity import EcoTechBridgeEntity, EcoTechDeviceEntity
 from .entity import KhEntity
 from .protocol import MEASUREMENT_STATES, DpState
 
@@ -32,6 +34,18 @@ async def async_setup_entry(
 ) -> None:
     """Set up sensors for whichever device family this entry is."""
     coordinator = entry.runtime_data
+
+    if isinstance(coordinator, EcoTechCoordinator):
+        eco: list[SensorEntity] = [
+            EcoTechBridgeSignalSensor(coordinator),
+            EcoTechBridgeDevicesSensor(coordinator),
+        ]
+        eco += [
+            EcoTechDeviceSignalSensor(coordinator, device)
+            for device in coordinator.controllable_devices()
+        ]
+        async_add_entities(eco)
+        return
 
     if coordinator.family == FAMILY_DP:
         entities: list[SensorEntity] = [DpSensor(coordinator, desc) for desc in DP_SENSORS]
@@ -387,3 +401,64 @@ class DpNextDose(KhEntity, SensorEntity):
                 {"time": f"{m // 60:02d}:{m % 60:02d}", "ml": v} for m, v in state.timetable
             ],
         }
+
+
+# ---------------------------------------------------------------------------
+# EcoTech (Mobius) sensors — the bridge hub + per-device diagnostics
+# ---------------------------------------------------------------------------
+
+
+class EcoTechBridgeSignalSensor(EcoTechBridgeEntity, SensorEntity):
+    """Bridge Wi-Fi signal strength."""
+
+    _attr_name = "Signal"
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_native_unit_of_measurement = "dBm"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: EcoTechCoordinator) -> None:
+        super().__init__(coordinator, "wifi_signal")
+
+    @property
+    def native_value(self) -> StateType:
+        rssi = self.coordinator.bridge_info.get("rssi")
+        return rssi if isinstance(rssi, (int, float)) else None
+
+
+class EcoTechBridgeDevicesSensor(EcoTechBridgeEntity, SensorEntity):
+    """How many Mobius devices the bridge currently sees."""
+
+    _attr_name = "Devices"
+    _attr_icon = "mdi:bluetooth"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: EcoTechCoordinator) -> None:
+        super().__init__(coordinator, "device_count")
+
+    @property
+    def native_value(self) -> StateType:
+        return len(self.coordinator.data or {})
+
+
+class EcoTechDeviceSignalSensor(EcoTechDeviceEntity, SensorEntity):
+    """BLE signal strength of one Mobius device (available even if state fails)."""
+
+    _attr_name = "Signal"
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_native_unit_of_measurement = "dBm"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: EcoTechCoordinator, device) -> None:
+        super().__init__(coordinator, device, "ble_signal")
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self._record is not None
+
+    @property
+    def native_value(self) -> StateType:
+        rec = self._record
+        return rec.device.rssi if rec else None
