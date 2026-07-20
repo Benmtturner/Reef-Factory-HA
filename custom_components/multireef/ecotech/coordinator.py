@@ -69,7 +69,7 @@ class EcoTechCoordinator(DataUpdateCoordinator[dict[str, DeviceRecord]]):
             state: DeviceState | None = None
             if dev.type in CONTROLLABLE_TYPES:
                 try:
-                    state = await self.bridge.state(dev.mac)
+                    state = await self.bridge.state(dev.target)
                 except BridgeError as err:
                     # A single connect-on-demand miss (pump briefly busy or the app
                     # grabbed it) shouldn't flap the entity offline — carry the
@@ -91,28 +91,32 @@ class EcoTechCoordinator(DataUpdateCoordinator[dict[str, DeviceRecord]]):
             if rec.device.type in CONTROLLABLE_TYPES
         ]
 
-    def _mac_for(self, identity: str) -> str | None:
-        """Resolve a stable identity to its current MAC (handles address rotation)."""
+    def _target_for(self, identity: str) -> str | None:
+        """Bridge query fragment for a device — serial-preferred; the bridge resolves
+        it to the current address, so a rolled MAC doesn't matter."""
         rec = self.record(identity)
-        return rec.device.mac if rec else None
+        return rec.device.target if rec else None
 
     async def _apply(self, identity: str, action) -> None:
         """Run a bridge write for a device, then refresh just that device."""
-        mac = self._mac_for(identity)
-        if mac is None:
+        target = self._target_for(identity)
+        if target is None:
             _LOGGER.warning("no device %s to command", identity)
             return
         try:
-            await action(mac)
+            await action(target)
         except BridgeError as err:
             _LOGGER.error("command to %s failed: %s", identity, err)
             raise
-        await self._refresh_one(identity, mac)
+        await self._refresh_one(identity)
 
-    async def _refresh_one(self, identity: str, mac: str) -> None:
+    async def _refresh_one(self, identity: str) -> None:
         """Re-read one device and push the update (cheaper than a full poll)."""
+        target = self._target_for(identity)
+        if target is None:
+            return
         try:
-            state = await self.bridge.state(mac)
+            state = await self.bridge.state(target)
         except BridgeError:
             return
         data = dict(self.data or {})
@@ -122,13 +126,13 @@ class EcoTechCoordinator(DataUpdateCoordinator[dict[str, DeviceRecord]]):
             self.async_set_updated_data(data)
 
     async def async_set_scene(self, identity: str, scene: int) -> None:
-        await self._apply(identity, lambda mac: self.bridge.set_scene(mac, scene))
+        await self._apply(identity, lambda t: self.bridge.set_scene(t, scene))
 
     async def async_set_speed(self, identity: str, percent: int) -> None:
-        await self._apply(identity, lambda mac: self.bridge.set_speed(mac, percent))
+        await self._apply(identity, lambda t: self.bridge.set_speed(t, percent))
 
     async def async_set_mode(self, identity: str, mode: int) -> None:
-        await self._apply(identity, lambda mac: self.bridge.set_mode(mac, mode))
+        await self._apply(identity, lambda t: self.bridge.set_mode(t, mode))
 
     async def async_run_schedule(self, identity: str) -> None:
-        await self._apply(identity, lambda mac: self.bridge.run_schedule(mac))
+        await self._apply(identity, lambda t: self.bridge.run_schedule(t))

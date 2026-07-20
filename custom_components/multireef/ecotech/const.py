@@ -15,7 +15,7 @@ POLL_INTERVAL = 300  # seconds (5 min)
 # Version of the bridge firmware bundled at firmware/mobius_bridge.bin. The update
 # entity offers this to any bridge running an older fw (compared to its /health).
 # Keep in lockstep with FW_VERSION in mobius/mobius_bridge/mobius_bridge.ino.
-BRIDGE_FW_VERSION = "0.1.3"
+BRIDGE_FW_VERSION = "0.1.7"
 
 # Advert manufacturer-data type byte → model. Only 0x0B is confirmed so far; the
 # rest of the user's fleet is unmapped (ID them by reading the device-name attr).

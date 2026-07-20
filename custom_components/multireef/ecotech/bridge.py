@@ -46,10 +46,17 @@ class BridgeDevice:
     def identity(self) -> str:
         """Stable id: serial when advertised, else the MAC.
 
-        Public-address gear (MP10, Radion cluster) has a stable MAC; some units use
-        rotating random addresses, so their serial is the only durable identity.
+        The MP10 (and others) roll a new random-static MAC on every power-cycle, so
+        the serial is the only durable identity. MAC is a fallback for gear that
+        never advertises a serial.
         """
         return self.serial or self.mac
+
+    @property
+    def target(self) -> str:
+        """Query fragment to address this device on the bridge — serial preferred
+        (the bridge resolves it to the current address), MAC only as a fallback."""
+        return f"serial={self.serial}" if self.serial else f"mac={self.mac}"
 
 
 @dataclass(frozen=True)
@@ -111,13 +118,17 @@ class MobiusBridge:
             for d in rows
         ]
 
-    async def state(self, mac: str) -> DeviceState:
-        """Read scene/mode/speed for one device (brief connect-on-demand)."""
-        d = await self._request("GET", f"/state?mac={mac}")
+    async def state(self, target: str) -> DeviceState:
+        """Read scene/mode/speed for one device (brief connect-on-demand).
+
+        ``target`` is a query fragment addressing the device — ``serial=…`` (stable,
+        preferred) or ``mac=…``. The bridge resolves a serial to the current address.
+        """
+        d = await self._request("GET", f"/state?{target}")
         if not isinstance(d, dict):
-            raise BridgeError(f"/state?mac={mac} returned non-object")
+            raise BridgeError(f"/state?{target} returned non-object")
         return DeviceState(
-            mac=str(d.get("mac", mac)),
+            mac=str(d.get("mac", "")),
             scene=int(d.get("scene", -1)),
             mode=int(d.get("mode", -1)),
             mode_name=str(d.get("modeName", "?")),
@@ -127,17 +138,19 @@ class MobiusBridge:
             ok=bool(d.get("ok", False)),
         )
 
-    async def set_scene(self, mac: str, scene: int) -> None:
-        await self._request("POST", f"/scene?mac={mac}&value={int(scene)}")
+    async def set_scene(self, target: str, scene: int) -> None:
+        await self._request("POST", f"/scene?{target}&value={int(scene)}")
 
-    async def set_speed(self, mac: str, percent: int) -> None:
-        await self._request("POST", f"/speed?mac={mac}&value={int(percent)}")
+    async def set_speed(self, target: str, percent: int) -> None:
+        """Set + PERSIST wave speed (the bridge does preview 0x197 + commit 0x1F4)."""
+        await self._request("POST", f"/speed?{target}&value={int(percent)}")
 
-    async def set_mode(self, mac: str, mode: int) -> None:
-        await self._request("POST", f"/mode?mac={mac}&value={int(mode)}")
+    async def set_mode(self, target: str, mode: int) -> None:
+        """Set + PERSIST wave mode (preview + commit)."""
+        await self._request("POST", f"/mode?{target}&value={int(mode)}")
 
-    async def run_schedule(self, mac: str) -> None:
-        await self._request("POST", f"/run?mac={mac}")
+    async def run_schedule(self, target: str) -> None:
+        await self._request("POST", f"/run?{target}")
 
     async def upload_firmware(self, data: bytes) -> None:
         """OTA a new firmware image to the bridge (multipart POST /update).
