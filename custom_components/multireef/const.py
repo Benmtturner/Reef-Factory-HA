@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from homeassistant.const import Platform
 
-DOMAIN = "reef_factory_kh"
+DOMAIN = "multireef"
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,

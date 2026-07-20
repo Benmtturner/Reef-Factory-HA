@@ -1,8 +1,8 @@
 /*
  * Reef Factory Doser card — a Lovelace card for the RFDP single-head doser.
  *
- * The reef_factory_kh integration bundles and auto-loads this file (served at
- * /reef_factory_kh/reef-factory-doser-card.js), so no manual www/ copy or
+ * The multireef integration bundles and auto-loads this file (served at
+ * /multireef/reef-factory-doser-card.js), so no manual www/ copy or
  * Lovelace-resource step is needed — just add the card:
  *
  *   type: custom:reef-factory-doser-card
@@ -371,7 +371,7 @@ class ReefFactoryDoserCard extends HTMLElement {
     host.querySelector("#ok").onclick = () => {
       const amount = parseFloat(host.querySelector("#amt").value);
       const days = parseInt(host.querySelector("#days").value || "0", 10);
-      if (!isNaN(amount)) this._call("reef_factory_kh", "manual_refill", { entity_id: this._refillTarget(), amount, days });
+      if (!isNaN(amount)) this._call("multireef", "manual_refill", { entity_id: this._refillTarget(), amount, days });
       this._close();
     };
   }
@@ -389,7 +389,7 @@ class ReefFactoryDoserCard extends HTMLElement {
       const capacity = parseFloat(host.querySelector("#cap").value);
       // One combined write — two separate number sets race and cancel each other out.
       if (!isNaN(level) && !isNaN(capacity)) {
-        this._call("reef_factory_kh", "set_container", { entity_id: this._refillTarget(), level, capacity });
+        this._call("multireef", "set_container", { entity_id: this._refillTarget(), level, capacity });
       }
       this._close();
     };
@@ -533,7 +533,7 @@ class ReefFactoryDoserCard extends HTMLElement {
       if (doses.length) {
         const data = { entity_id: this._refillTarget(), doses };
         if (sel.size) data.days = [...sel];
-        this._call("reef_factory_kh", "set_doses", data);
+        this._call("multireef", "set_doses", data);
       }
       this._close();
     };
@@ -550,7 +550,7 @@ class ReefFactoryDoserCard extends HTMLElement {
     host.querySelector("#cancel").onclick = () => this._close();
     host.querySelector("#ok").onclick = () => {
       const percent = parseInt(host.querySelector("#pct").value, 10);
-      if (!isNaN(percent)) this._call("reef_factory_kh", "skip_next", { entity_id: this._refillTarget(), percent });
+      if (!isNaN(percent)) this._call("multireef", "skip_next", { entity_id: this._refillTarget(), percent });
       this._close();
     };
   }
@@ -592,7 +592,7 @@ class ReefFactoryDoserCard extends HTMLElement {
         const dd = String(obj.days).split(",").map((x) => x.trim()).filter(Boolean);
         if (dd.length) data.days = dd;
       }
-      this._call("reef_factory_kh", "set_doses", data);
+      this._call("multireef", "set_doses", data);
       this._close();
     };
   }
@@ -614,7 +614,7 @@ class ReefFactoryDoserCard extends HTMLElement {
     host.querySelector("#cancel").onclick = () => this._close();
     host.querySelector("#submit").onclick = () => {
       const measured_ml = parseFloat(host.querySelector("#meas").value);
-      if (!isNaN(measured_ml)) this._call("reef_factory_kh", "submit_calibration", { entity_id: this._refillTarget(), measured_ml });
+      if (!isNaN(measured_ml)) this._call("multireef", "submit_calibration", { entity_id: this._refillTarget(), measured_ml });
       this._close();
     };
   }

@@ -3,7 +3,7 @@ manual_refill:
   description: Dose an amount now, or spread it over several days.
   target:
     entity:
-      integration: reef_factory_kh
+      integration: multireef
       domain: binary_sensor
   fields:
     amount:
@@ -32,7 +32,7 @@ skip_next:
   description: Skip a percentage of the next scheduled dose.
   target:
     entity:
-      integration: reef_factory_kh
+      integration: multireef
       domain: binary_sensor
   fields:
     percent:
@@ -54,7 +54,7 @@ submit_calibration:
     Fill Circuit then Run Calibration buttons first, catch the output in a cup).
   target:
     entity:
-      integration: reef_factory_kh
+      integration: multireef
       domain: binary_sensor
   fields:
     measured_ml:
@@ -85,7 +85,7 @@ set_schedule:
     total, on the chosen days. (Per-dose time editing comes with the card.)
   target:
     entity:
-      integration: reef_factory_kh
+      integration: multireef
       domain: binary_sensor
   fields:
     number_of_doses:
@@ -124,7 +124,7 @@ set_container:
     the card's Edit dialog — setting them separately races and cancels out).
   target:
     entity:
-      integration: reef_factory_kh
+      integration: multireef
       domain: binary_sensor
   fields:
     level:
@@ -158,7 +158,7 @@ set_doses:
     and adjust-by-%.
   target:
     entity:
-      integration: reef_factory_kh
+      integration: multireef
       domain: binary_sensor
   fields:
     doses:

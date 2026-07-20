@@ -29,7 +29,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Reef Factory options",
+        "title": "Multi Reef options",
         "description": "Logs raw WebSocket frames from the device to the Home Assistant log for troubleshooting. Leave off during normal use.",
         "data": {
           "log_frames": "Diagnostic frame logging"

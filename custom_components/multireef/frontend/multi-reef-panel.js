@@ -1,7 +1,7 @@
 /*
  * Multi Reef — sidebar panel / config engine.
  *
- * Registered by the reef_factory_kh integration as a custom panel. It discovers
+ * Registered by the multireef integration as a custom panel. It discovers
  * supported reef devices and provisions their purpose-built cards onto the user's
  * real dashboards — pick a device, pick a dashboard + view, and it writes the card
  * in, pre-linked, with no copy-paste.
