@@ -17,6 +17,7 @@ from homeassistant.components import network
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -155,12 +156,20 @@ class RedSeaDoserCoordinator(DataUpdateCoordinator[DoserState]):
     def set_manual_dose(self, head: int, ml: float) -> None:
         self.manual_dose_ml[head] = ml
 
+    async def _write(self, awaitable) -> None:
+        """Run a device write; turn a device error into a clean HA error dialog
+        (e.g. "cannot have multiple manual doses for same head")."""
+        try:
+            await awaitable
+        except ReefBeatError as err:
+            raise HomeAssistantError(str(err)) from err
+
     # --- device writes -------------------------------------------------------
 
     async def async_manual_dose(self, head: int, volume_ml: float | None = None) -> None:
         """Dose now on ``head`` (defaults to the head's manual setpoint)."""
         ml = self.get_manual_dose(head) if volume_ml is None else volume_ml
-        await self._client.manual_dose(head, ml)
+        await self._write(self._client.manual_dose(head, ml))
         await self.async_request_refresh()
 
     async def _patch_head(self, head: int, **changes: Any) -> None:
@@ -170,7 +179,7 @@ class RedSeaDoserCoordinator(DataUpdateCoordinator[DoserState]):
             _LOGGER.warning("no cached settings for head %s; skipping write", head)
             return
         updated = {**raw, **changes}
-        await self._client.put_head_settings(head, updated)
+        await self._write(self._client.put_head_settings(head, updated))
         self._raw_heads[head] = updated
         await self.async_request_refresh()
 
@@ -182,7 +191,7 @@ class RedSeaDoserCoordinator(DataUpdateCoordinator[DoserState]):
             return
         schedule = {**(raw.get("schedule") or {}), **changes}
         updated = {**raw, "schedule": schedule}
-        await self._client.put_head_settings(head, updated)
+        await self._write(self._client.put_head_settings(head, updated))
         self._raw_heads[head] = updated
         await self.async_request_refresh()
 
@@ -193,7 +202,7 @@ class RedSeaDoserCoordinator(DataUpdateCoordinator[DoserState]):
             _LOGGER.warning("no cached device-settings; skipping write")
             return
         updated = {**raw, **changes}
-        await self._client.put_device_settings(updated)
+        await self._write(self._client.put_device_settings(updated))
         self._raw_device_settings = updated
         await self.async_request_refresh()
 
@@ -207,7 +216,7 @@ class RedSeaDoserCoordinator(DataUpdateCoordinator[DoserState]):
 
     async def async_set_heads_on(self, on: bool) -> None:
         """Turn automatic dosing on (auto) or off (all heads off)."""
-        await self._client.set_heads_off(not on)
+        await self._write(self._client.set_heads_off(not on))
         await self.async_request_refresh()
 
     async def async_set_daily_dose(self, head: int, ml: float) -> None:
@@ -216,7 +225,7 @@ class RedSeaDoserCoordinator(DataUpdateCoordinator[DoserState]):
 
     async def async_set_priming(self, head: int, start: bool) -> None:
         """Start/stop priming a head's dosing tube."""
-        await self._client.prime(head, start)
+        await self._write(self._client.prime(head, start))
         await self.async_request_refresh()
 
     async def async_set_food_head(self, head: int, enabled: bool) -> None:

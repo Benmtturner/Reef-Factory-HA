@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import json
 import logging
 from typing import Any
 
@@ -31,6 +32,29 @@ _LOGGER = logging.getLogger(__name__)
 
 class ReefBeatError(Exception):
     """The device was unreachable or returned an error response."""
+
+
+def _device_error(text: str, status: int) -> str:
+    """Pull the device's own human message out of a 4xx/5xx JSON body.
+
+    ReefDose validation errors look like
+    ``{"errors":[{"error_code":"MultipleManual","message":"cannot have …"}],…}``
+    or ``{"field_errors":[{"field":"volume","message":"must not be null"}],…}``.
+    """
+    try:
+        body = json.loads(text)
+        for key in ("errors", "field_errors"):
+            items = body.get(key)
+            if isinstance(items, list) and items:
+                first = items[0]
+                msg = first.get("message") or first.get("error_code")
+                if msg:
+                    return str(msg)
+        if body.get("message"):
+            return str(body["message"])
+    except (ValueError, AttributeError, TypeError):
+        pass
+    return f"HTTP {status}"
 
 
 def _f(value: Any, default: float = 0.0) -> float:
@@ -178,7 +202,10 @@ class ReefDoseClient:
                 async with self._session.request(
                     method, f"{self._base}{path}", json=payload, timeout=timeout
                 ) as resp:
-                    resp.raise_for_status()
+                    if resp.status >= 400:
+                        # Surface the device's own validation message (e.g. a
+                        # manual-dose clash) rather than a bare "Bad Request".
+                        raise ReefBeatError(_device_error(await resp.text(), resp.status))
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 raise ReefBeatError(f"{method.upper()} {path} failed: {err}") from err
 
