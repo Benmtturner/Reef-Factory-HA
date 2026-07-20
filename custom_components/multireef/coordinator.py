@@ -489,10 +489,18 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._dp_manual_seen = False
         self._dp_refill_target = None
         self._dp_refill_dispensed = None
+        # Background tasks, NOT hass.async_create_task: bootstrap waits on plain
+        # tasks before declaring startup done, so an infinite poll loop (or a slow
+        # MAC lookup) registered during startup makes HA sit in "starting" until
+        # the wait times out ("Something is blocking Home Assistant…").
         if not self.mac:
-            self.hass.async_create_task(self._learn_mac())
+            self.entry.async_create_background_task(
+                self.hass, self._learn_mac(), name=f"{DOMAIN}_learn_mac_{self.host}"
+            )
         poll_task = (
-            self.hass.async_create_task(self._dp_poll_loop(ws))
+            self.entry.async_create_background_task(
+                self.hass, self._dp_poll_loop(ws), name=f"{DOMAIN}_dp_poll_{self.host}"
+            )
             if self.family == FAMILY_DP
             else None
         )
@@ -552,7 +560,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         so this read is safe. Debounced against bursts of dose frames."""
         if self._dp_hist_task and not self._dp_hist_task.done():
             self._dp_hist_task.cancel()
-        self._dp_hist_task = self.hass.async_create_task(self._dp_settings_after(DP_DOSE_REFRESH_DELAY))
+        self._dp_hist_task = self.entry.async_create_background_task(
+            self.hass,
+            self._dp_settings_after(DP_DOSE_REFRESH_DELAY),
+            name=f"{DOMAIN}_dp_dose_refresh_{self.host}",
+        )
 
     async def _dp_settings_after(self, delay: float) -> None:
         try:
