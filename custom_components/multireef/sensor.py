@@ -25,6 +25,9 @@ from .ecotech.coordinator import EcoTechCoordinator
 from .ecotech.entity import EcoTechBridgeEntity, EcoTechDeviceEntity
 from .entity import KhEntity
 from .protocol import MEASUREMENT_STATES, DpState
+from .redsea.api import HeadState
+from .redsea.coordinator import RedSeaDoserCoordinator
+from .redsea.entity import RedSeaDoserEntity, RedSeaHeadEntity
 
 
 async def async_setup_entry(
@@ -45,6 +48,18 @@ async def async_setup_entry(
             for device in coordinator.controllable_devices()
         ]
         async_add_entities(eco)
+        return
+
+    if isinstance(coordinator, RedSeaDoserCoordinator):
+        rs: list[SensorEntity] = [RedSeaBatterySensor(coordinator)]
+        for head in range(1, coordinator.heads_nb + 1):
+            rs += [
+                RedSeaHeadSensor(coordinator, head, desc)
+                for desc in REDSEA_HEAD_SENSORS
+            ]
+            rs.append(RedSeaNextDoseSensor(coordinator, head))
+            rs.append(RedSeaLastCalibratedSensor(coordinator, head))
+        async_add_entities(rs)
         return
 
     if coordinator.family == FAMILY_DP:
@@ -462,3 +477,159 @@ class EcoTechDeviceSignalSensor(EcoTechDeviceEntity, SensorEntity):
     def native_value(self) -> StateType:
         rec = self._record
         return rec.device.rssi if rec else None
+
+
+# ---------------------------------------------------------------------------
+# Red Sea (ReefBeat) ReefDose sensors — per head + a device battery sensor
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, kw_only=True)
+class RedSeaHeadSensorDescription(SensorEntityDescription):
+    """Describes a per-head ReefDose sensor with a value extractor."""
+
+    value_fn: Callable[[HeadState], StateType]
+
+
+REDSEA_HEAD_SENSORS: tuple[RedSeaHeadSensorDescription, ...] = (
+    RedSeaHeadSensorDescription(
+        key="dosed_today",
+        name="Dosed Today",
+        native_unit_of_measurement=UNIT_ML,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:beaker-check-outline",
+        suggested_display_precision=2,
+        value_fn=lambda h: h.dosed_today_ml,
+    ),
+    RedSeaHeadSensorDescription(
+        key="daily_target",
+        name="Daily Target",
+        native_unit_of_measurement=UNIT_ML,
+        icon="mdi:target-variant",
+        suggested_display_precision=2,
+        value_fn=lambda h: h.daily_dose_ml,
+    ),
+    RedSeaHeadSensorDescription(
+        key="doses_per_day",
+        name="Doses per Day",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:counter",
+        value_fn=lambda h: h.daily_doses,
+    ),
+    RedSeaHeadSensorDescription(
+        key="remaining_days",
+        name="Remaining Days",
+        native_unit_of_measurement="d",
+        icon="mdi:calendar-clock",
+        value_fn=lambda h: h.remaining_days,
+    ),
+    RedSeaHeadSensorDescription(
+        key="stock_level",
+        name="Stock Level",
+        icon="mdi:gauge",
+        value_fn=lambda h: h.stock_level,
+    ),
+    RedSeaHeadSensorDescription(
+        key="supplement",
+        name="Supplement",
+        icon="mdi:bottle-tonic-outline",
+        value_fn=lambda h: h.supplement,
+    ),
+)
+
+
+class RedSeaHeadSensor(RedSeaHeadEntity, SensorEntity):
+    """A single decoded per-head ReefDose sensor."""
+
+    entity_description: RedSeaHeadSensorDescription
+
+    def __init__(
+        self, coordinator, head: int, description: RedSeaHeadSensorDescription
+    ) -> None:
+        super().__init__(coordinator, head, description.key, description.name)
+        self.entity_description = description
+
+    @property
+    def native_value(self) -> StateType:
+        head = self._head_state
+        return self.entity_description.value_fn(head) if head else None
+
+
+class RedSeaNextDoseSensor(RedSeaHeadEntity, SensorEntity):
+    """Next scheduled dose time for a head (None when the schedule is off).
+
+    Handles the schedule types the device exposes: ``single`` (one dose/day at
+    ``schedule.time``) and ``hourly`` (every hour at ``schedule.min``). ``custom``
+    and ``timer`` schedules aren't modelled yet, so those report None.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(self, coordinator, head: int) -> None:
+        super().__init__(coordinator, head, "next_dose", "Next Dose")
+
+    @property
+    def native_value(self) -> datetime | None:
+        head = self._head_state
+        if head is None or not head.schedule_enabled or not head.days:
+            return None
+        now = dt_util.now()
+        if head.schedule_type == "single":
+            hour, minute = divmod(head.dose_time_min, 60)
+            for offset in range(8):
+                day = now + timedelta(days=offset)
+                if day.isoweekday() in head.days:
+                    target = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    if target > now:
+                        return target
+            return None
+        if head.schedule_type == "hourly":
+            # Dose every hour at :min — first future :min hour on an active day.
+            base = now.replace(minute=head.schedule_min % 60, second=0, microsecond=0)
+            for offset in range(24 * 8):
+                target = base + timedelta(hours=offset)
+                if target > now and target.isoweekday() in head.days:
+                    return target
+            return None
+        return None  # custom / timer not modelled yet
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        head = self._head_state
+        if head is None:
+            return {}
+        return {"schedule_type": head.schedule_type, "doses_per_day": head.daily_doses}
+
+
+class RedSeaLastCalibratedSensor(RedSeaHeadEntity, SensorEntity):
+    """When a head was last calibrated."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:progress-wrench"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, head: int) -> None:
+        super().__init__(coordinator, head, "last_calibrated", "Last Calibrated")
+
+    @property
+    def native_value(self) -> datetime | None:
+        head = self._head_state
+        if head is None or head.last_calibrated <= 0:
+            return None
+        return dt_util.utc_from_timestamp(head.last_calibrated)
+
+
+class RedSeaBatterySensor(RedSeaDoserEntity, SensorEntity):
+    """RTC-backup battery status ('low' = coin cell dying → clock drift)."""
+
+    _attr_name = "Battery"
+    _attr_icon = "mdi:battery-alert-variant-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "battery")
+
+    @property
+    def native_value(self) -> StateType:
+        return self.coordinator.data.battery_level if self.coordinator.data else None

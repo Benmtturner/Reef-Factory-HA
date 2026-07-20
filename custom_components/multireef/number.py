@@ -12,6 +12,15 @@ from .const import FAMILY_DP, FAMILY_KH, UNIT_ML
 from .ecotech.coordinator import EcoTechCoordinator
 from .ecotech.entity import EcoTechDeviceEntity
 from .entity import KhEntity
+from .redsea.const import (
+    CONTAINER_MAX_ML,
+    DAILY_DOSE_MAX_ML,
+    DOSING_DELAY_MAX_S,
+    MANUAL_DOSE_MAX_ML,
+    STOCK_DAYS_MAX,
+)
+from .redsea.coordinator import RedSeaDoserCoordinator
+from .redsea.entity import RedSeaDoserEntity, RedSeaHeadEntity
 
 
 async def async_setup_entry(
@@ -26,6 +35,17 @@ async def async_setup_entry(
             EcoTechSpeedNumber(coordinator, device)
             for device in coordinator.controllable_devices()
         )
+        return
+    if isinstance(coordinator, RedSeaDoserCoordinator):
+        nums: list[NumberEntity] = [
+            RedSeaDosingDelayNumber(coordinator),
+            RedSeaStockDaysNumber(coordinator),
+        ]
+        for head in range(1, coordinator.heads_nb + 1):
+            nums.append(RedSeaManualDoseNumber(coordinator, head))
+            nums.append(RedSeaDailyDoseNumber(coordinator, head))
+            nums.append(RedSeaContainerNumber(coordinator, head))
+        async_add_entities(nums)
         return
     if coordinator.family == FAMILY_DP:
         async_add_entities([DpReservoirLevel(coordinator), DpCapacity(coordinator)])
@@ -131,3 +151,133 @@ class EcoTechSpeedNumber(EcoTechDeviceEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_speed(self._identity, int(round(value)))
+
+
+# ---------------------------------------------------------------------------
+# Red Sea (ReefBeat) ReefDose numbers — per head
+# ---------------------------------------------------------------------------
+
+
+class RedSeaManualDoseNumber(RedSeaHeadEntity, NumberEntity):
+    """Manual-dose volume (mL) — a local setpoint the Dose Now button uses.
+
+    Held in the coordinator (not pushed to the device); pressing the head's
+    Dose Now button doses exactly this amount.
+    """
+
+    _attr_native_unit_of_measurement = UNIT_ML
+    _attr_native_min_value = 0.1
+    _attr_native_max_value = MANUAL_DOSE_MAX_ML
+    _attr_native_step = 0.1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:eyedropper-variant"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, head: int) -> None:
+        super().__init__(coordinator, head, "manual_dose", "Manual Dose")
+
+    @property
+    def available(self) -> bool:
+        # A local setpoint — usable as long as the coordinator is alive, even if a
+        # single poll missed (don't gate it on head state like device-backed ones).
+        return self.coordinator.last_update_success
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.get_manual_dose(self._head)
+
+    async def async_set_native_value(self, value: float) -> None:
+        self.coordinator.set_manual_dose(self._head, value)
+        self.async_write_ha_state()
+
+
+class RedSeaContainerNumber(RedSeaHeadEntity, NumberEntity):
+    """Reservoir contents (mL) for a head — displays and writes to the device."""
+
+    _attr_native_unit_of_measurement = UNIT_ML
+    _attr_native_min_value = 0
+    _attr_native_max_value = CONTAINER_MAX_ML
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:cup-water"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, head: int) -> None:
+        super().__init__(coordinator, head, "container", "Container")
+
+    @property
+    def native_value(self) -> float | None:
+        head = self._head_state
+        return head.container_ml if head else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_container(self._head, value)
+
+
+class RedSeaDailyDoseNumber(RedSeaHeadEntity, NumberEntity):
+    """Dose-per-day target (mL) for a head — displays and writes ``schedule.dd``."""
+
+    _attr_native_unit_of_measurement = UNIT_ML
+    _attr_native_min_value = 0
+    _attr_native_max_value = DAILY_DOSE_MAX_ML
+    _attr_native_step = 0.1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:target-variant"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, head: int) -> None:
+        super().__init__(coordinator, head, "daily_dose", "Daily Dose")
+
+    @property
+    def native_value(self) -> float | None:
+        head = self._head_state
+        return head.daily_dose_ml if head else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_daily_dose(self._head, value)
+
+
+class RedSeaDosingDelayNumber(RedSeaDoserEntity, NumberEntity):
+    """Device dosing delay (seconds waited between dosing each head)."""
+
+    _attr_name = "Dosing Delay"
+    _attr_native_unit_of_measurement = "s"
+    _attr_native_min_value = 0
+    _attr_native_max_value = DOSING_DELAY_MAX_S
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:timer-sand"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "dosing_delay")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.data.dosing_delay if self.coordinator.data else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_dosing_delay(int(value))
+
+
+class RedSeaStockDaysNumber(RedSeaDoserEntity, NumberEntity):
+    """Supplement-volume-monitor alert threshold (days of stock remaining)."""
+
+    _attr_name = "Stock Alert Days"
+    _attr_native_unit_of_measurement = "d"
+    _attr_native_min_value = 1
+    _attr_native_max_value = STOCK_DAYS_MAX
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:calendar-alert"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "stock_alert_days")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.data.stock_alert_days if self.coordinator.data else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_stock_days(int(value))

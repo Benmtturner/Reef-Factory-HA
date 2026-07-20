@@ -12,6 +12,8 @@ from .const import FAMILY_DP, FAMILY_KH
 from .ecotech.coordinator import EcoTechCoordinator
 from .ecotech.entity import EcoTechBridgeEntity
 from .entity import KhEntity
+from .redsea.coordinator import RedSeaDoserCoordinator
+from .redsea.entity import RedSeaDoserEntity, RedSeaHeadEntity
 
 
 async def async_setup_entry(
@@ -23,6 +25,14 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
     if isinstance(coordinator, EcoTechCoordinator):
         async_add_entities([EcoTechRefreshButton(coordinator)])
+        return
+    if isinstance(coordinator, RedSeaDoserCoordinator):
+        buttons: list[ButtonEntity] = [RedSeaRefreshButton(coordinator)]
+        buttons += [
+            RedSeaDoseNowButton(coordinator, head)
+            for head in range(1, coordinator.heads_nb + 1)
+        ]
+        async_add_entities(buttons)
         return
     if coordinator.family == FAMILY_DP:
         async_add_entities(
@@ -117,6 +127,37 @@ class EcoTechRefreshButton(EcoTechBridgeEntity, ButtonEntity):
     _attr_icon = "mdi:refresh"
 
     def __init__(self, coordinator: EcoTechCoordinator) -> None:
+        super().__init__(coordinator, "refresh")
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_request_refresh()
+
+
+# ---------------------------------------------------------------------------
+# Red Sea (ReefBeat) ReefDose buttons
+# ---------------------------------------------------------------------------
+
+
+class RedSeaDoseNowButton(RedSeaHeadEntity, ButtonEntity):
+    """Dose the head's manual-dose volume now (POST /head/{n}/manual)."""
+
+    _attr_icon = "mdi:water-plus"
+
+    def __init__(self, coordinator, head: int) -> None:
+        super().__init__(coordinator, head, "dose_now", "Dose Now")
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_manual_dose(self._head)
+
+
+class RedSeaRefreshButton(RedSeaDoserEntity, ButtonEntity):
+    """Pull fresh state from the doser now (between the gentle background polls)."""
+
+    _attr_name = "Refresh"
+    _attr_icon = "mdi:refresh"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "refresh")
 
     async def async_press(self) -> None:

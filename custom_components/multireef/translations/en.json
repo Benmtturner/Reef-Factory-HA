@@ -5,7 +5,8 @@
         "title": "Add to Multi Reef",
         "menu_options": {
           "reef_factory": "Reef Factory device (KH Keeper, doser)",
-          "bridge": "EcoTech bridge (VorTech, Radion…)"
+          "bridge": "EcoTech bridge (VorTech, Radion…)",
+          "redsea": "Red Sea (ReefDose…)"
         }
       },
       "bridge": {
@@ -13,6 +14,21 @@
         "description": "Enter the Multi Reef bridge's address. Leave the default if you flashed it as multireef.local.",
         "data": {
           "bridge_host": "Bridge address (host or IP)"
+        }
+      },
+      "redsea_pick": {
+        "title": "Select your ReefDose",
+        "description": "These Red Sea ReefDose dosers were found on your network. Pick one, or choose manual entry.",
+        "data": {
+          "host": "Device"
+        }
+      },
+      "redsea_manual": {
+        "title": "Enter ReefDose IP",
+        "description": "No ReefDose was found automatically, or you chose manual entry. Enter its LAN IP address. Reserve a static IP for it in your router first.",
+        "data": {
+          "host": "IP address",
+          "name": "Name (optional)"
         }
       },
       "pick": {
@@ -33,7 +49,7 @@
     },
     "error": {
       "cannot_connect": "Could not reach the device. Check the IP and that it is on the same network.",
-      "not_supported": "That device responded but is not a supported Reef Factory device (serial does not start with RFKH or RFDP)."
+      "not_supported": "That device responded but is not a supported device for this option (Reef Factory serials start with RFKH/RFDP; Red Sea must be a ReefDose)."
     },
     "abort": {
       "already_configured": "This device is already configured.",

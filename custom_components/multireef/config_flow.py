@@ -30,8 +30,11 @@ from .const import (
     CONF_FIRMWARE,
     CONF_LOG_FRAMES,
     CONF_MAC,
+    CONF_REDSEA_HWID,
+    CONF_REDSEA_MODEL,
     CONF_SERIAL,
     ENTRY_TYPE_ECOTECH_BRIDGE,
+    ENTRY_TYPE_REDSEA_DOSER,
     MODELS,
     DOMAIN,
 )
@@ -39,6 +42,8 @@ from .coordinator import async_probe, async_scan
 from .ecotech.bridge import MobiusBridge
 from .ecotech.const import DEFAULT_BRIDGE_HOST
 from .protocol import DeviceConfig, detect_family
+from .redsea.const import DOSER_HEADS, DOSER_MODELS
+from .redsea.coordinator import async_probe_doser, async_scan_dosers
 
 
 def _model_for(serial: str) -> str:
@@ -72,6 +77,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._discovered: dict[str, DeviceConfig] = {}
+        self._redsea: dict[str, dict] = {}
 
     @staticmethod
     @callback
@@ -96,10 +102,10 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick what to add: a Reef Factory device or an EcoTech bridge."""
+        """Pick what to add: a Reef Factory device, an EcoTech bridge, or Red Sea."""
         return self.async_show_menu(
             step_id="user",
-            menu_options=["reef_factory", "bridge"],
+            menu_options=["reef_factory", "bridge", "redsea"],
         )
 
     async def async_step_reef_factory(
@@ -146,6 +152,83 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
                 {vol.Required(CONF_BRIDGE_HOST, default=DEFAULT_BRIDGE_HOST): str}
             ),
             errors=errors,
+        )
+
+    # -- Red Sea (ReefBeat) ---------------------------------------------------
+
+    async def async_step_redsea(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Scan the network for ReefDose devices, then pick or enter manually."""
+        found = await async_scan_dosers(self.hass)
+        configured = self._async_current_ids()
+        self._redsea = {
+            ip: info
+            for ip, info in found.items()
+            if (info.get("hwid") or ip) not in configured
+        }
+        if self._redsea:
+            return await self.async_step_redsea_pick()
+        return await self.async_step_redsea_manual()
+
+    async def async_step_redsea_pick(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose one of the discovered ReefDose devices."""
+        if user_input is not None:
+            choice = user_input[CONF_HOST]
+            if choice == MANUAL:
+                return await self.async_step_redsea_manual()
+            info = self._redsea[choice]
+            await self.async_set_unique_id(info.get("hwid") or choice)
+            self._abort_if_unique_id_configured()
+            return self._create_redsea_entry(choice, info)
+
+        options = {
+            ip: f"{DOSER_MODELS.get(info.get('hw_model', ''), 'ReefDose')} — {ip}"
+            for ip, info in self._redsea.items()
+        }
+        options[MANUAL] = "Enter IP address manually…"
+        return self.async_show_form(
+            step_id="redsea_pick",
+            data_schema=vol.Schema({vol.Required(CONF_HOST): vol.In(options)}),
+        )
+
+    async def async_step_redsea_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manual IP entry for a ReefDose (reliable fallback)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip()
+            try:
+                info = await async_probe_doser(self.hass, host)
+            except Exception:  # noqa: BLE001 — surfaced as a form error
+                _LOGGER.exception("Failed to probe ReefDose %s", host)
+                errors["base"] = "cannot_connect"
+            else:
+                if str(info.get("hw_model") or "") not in DOSER_HEADS:
+                    errors["base"] = "not_supported"
+                else:
+                    await self.async_set_unique_id(info.get("hwid") or host)
+                    self._abort_if_unique_id_configured()
+                    return self._create_redsea_entry(host, info)
+        return self.async_show_form(
+            step_id="redsea_manual", data_schema=MANUAL_SCHEMA, errors=errors
+        )
+
+    def _create_redsea_entry(self, host: str, info: dict) -> ConfigFlowResult:
+        """Create the config entry for a confirmed ReefDose."""
+        model = str(info.get("hw_model") or "RSDOSE2")
+        title = info.get("name") or DOSER_MODELS.get(model, "ReefDose")
+        return self.async_create_entry(
+            title=title,
+            data={
+                CONF_ENTRY_TYPE: ENTRY_TYPE_REDSEA_DOSER,
+                CONF_HOST: host,
+                CONF_REDSEA_HWID: info.get("hwid", ""),
+                CONF_REDSEA_MODEL: model,
+            },
         )
 
     async def async_step_pick(
