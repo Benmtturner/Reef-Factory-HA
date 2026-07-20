@@ -9,6 +9,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import KhConfigEntry
 from .const import FAMILY_DP, FAMILY_KH
+from .ecotech.coordinator import EcoTechCoordinator
+from .ecotech.entity import EcoTechBridgeEntity
 from .entity import KhEntity
 
 
@@ -19,6 +21,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up buttons for whichever device family this entry is."""
     coordinator = entry.runtime_data
+    if isinstance(coordinator, EcoTechCoordinator):
+        async_add_entities([EcoTechRefreshButton(coordinator)])
+        return
     if coordinator.family == FAMILY_DP:
         async_add_entities(
             [
@@ -103,3 +108,16 @@ class DpCalibrationRunButton(KhEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         await self.coordinator.async_dp_calibration_run()
+
+
+class EcoTechRefreshButton(EcoTechBridgeEntity, ButtonEntity):
+    """Pull current state from the pump(s) now — the on-demand model has no timer."""
+
+    _attr_name = "Refresh"
+    _attr_icon = "mdi:refresh"
+
+    def __init__(self, coordinator: EcoTechCoordinator) -> None:
+        super().__init__(coordinator, "refresh")
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_request_refresh()

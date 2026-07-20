@@ -21,6 +21,7 @@ ECOTECH_PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.SENSOR,
     Platform.UPDATE,
+    Platform.BUTTON,
 ]
 
 # LAN WebSocket transport.

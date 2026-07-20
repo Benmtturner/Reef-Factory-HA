@@ -20,7 +20,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from ..const import CONF_BRIDGE_HOST
 from .bridge import BridgeDevice, BridgeError, DeviceState, MobiusBridge
-from .const import CONTROLLABLE_TYPES, UPDATE_INTERVAL
+from .const import CONTROLLABLE_TYPES, POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,11 +38,14 @@ class EcoTechCoordinator(DataUpdateCoordinator[dict[str, DeviceRecord]]):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.host: str = entry.data[CONF_BRIDGE_HOST]
+        # Gentle 5-min background poll plus a Refresh button — the pump and the
+        # Mobius app are left alone between polls. The advert is identity-only, so a
+        # poll is the only way to catch state changed elsewhere (e.g. in the app).
         super().__init__(
             hass,
             _LOGGER,
             name=f"multireef_bridge_{self.host}",
-            update_interval=timedelta(seconds=UPDATE_INTERVAL),
+            update_interval=timedelta(seconds=POLL_INTERVAL),
         )
         self.entry = entry
         self.bridge = MobiusBridge(async_get_clientsession(hass), self.host)
