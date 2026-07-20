@@ -50,7 +50,8 @@ async def async_probe_doser(hass: HomeAssistant, host: str) -> dict[str, Any]:
         async with session.get(f"http://{host}/device-info", timeout=timeout) as resp:
             resp.raise_for_status()
             data = await resp.json(content_type=None)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+        # ValueError covers a non-JSON body (JSONDecodeError) — not a ReefDose.
         raise ReefBeatError(f"probe {host} failed: {err}") from err
     return data if isinstance(data, dict) else {}
 
@@ -58,14 +59,19 @@ async def async_probe_doser(hass: HomeAssistant, host: str) -> dict[str, Any]:
 async def _probe_quiet(
     session: aiohttp.ClientSession, host: str, timeout: float
 ) -> dict[str, Any] | None:
-    """Probe one host for /device-info, returning it or None (never raises)."""
+    """Probe one host for /device-info, returning it or None (never raises).
+
+    Scans hit arbitrary hosts (routers, other HTTP devices) that may answer 200
+    with non-JSON — so swallow *any* failure (incl. JSONDecodeError) and treat it
+    as "not a ReefDose here".
+    """
     try:
         async with asyncio.timeout(timeout):
             async with session.get(f"http://{host}/device-info") as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.json(content_type=None)
-    except (aiohttp.ClientError, OSError, asyncio.TimeoutError):
+    except Exception:  # noqa: BLE001 — any failure just means "no doser at this IP"
         return None
     return data if isinstance(data, dict) else None
 
@@ -95,7 +101,10 @@ async def async_scan_dosers(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
         if info and str(info.get("hw_model") or "") in DOSER_HEADS:
             found[host] = info
 
-    await asyncio.gather(*(_scan_one(f"{base}.{i}") for i in range(1, 255)))
+    # return_exceptions so one bad host can never abort the whole scan.
+    await asyncio.gather(
+        *(_scan_one(f"{base}.{i}") for i in range(1, 255)), return_exceptions=True
+    )
     return found
 
 

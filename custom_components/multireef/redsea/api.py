@@ -167,7 +167,8 @@ class ReefDoseClient:
                 ) as resp:
                     resp.raise_for_status()
                     return await resp.json(content_type=None)
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+                # ValueError = non-JSON body (JSONDecodeError).
                 raise ReefBeatError(f"GET {path} failed: {err}") from err
 
     async def _send(self, method: str, path: str, payload: Any) -> None:
