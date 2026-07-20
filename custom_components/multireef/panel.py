@@ -24,7 +24,7 @@ PANEL_JS_URL = f"/{DOMAIN}/multi-reef-panel.js"
 _PANEL_FILE = "frontend/multi-reef-panel.js"
 _WEBCOMPONENT = "multi-reef-panel"
 # Bump when the panel JS changes so the browser reloads it (?v= cache-buster).
-PANEL_VERSION = "0.3.0"
+PANEL_VERSION = "0.4.0"
 
 
 async def async_register_multi_reef_panel(hass: HomeAssistant) -> None:

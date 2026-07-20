@@ -61,6 +61,7 @@ class ReefDoseCard extends HTMLElement {
     // settings: "drawer" (behind ⚙) | "inline" (always visible)
     this._settingsMode = config.settings === "inline" ? "inline" : "drawer";
     this._sig = null;
+    this._update();
   }
 
   _isDark() {
@@ -75,6 +76,14 @@ class ReefDoseCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._update();
+  }
+
+  // HA can assign `hass` before `setConfig` (and vice versa) depending on how the
+  // view builds the element — only proceed once both are present, whatever the
+  // order, or the card lands as a red "Configuration error".
+  _update() {
+    if (!this._hass || !this._config) return;
     this._resolve();
     const sig = this._signature();
     if (sig !== this._sig) {

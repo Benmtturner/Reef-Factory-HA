@@ -37,6 +37,27 @@ const CATALOG = [
     // dosed_today sensor, so the head marker keeps the match unambiguous).
     anchorKeyword: "head_1_dosed_today",
     cardOptions: { grid_options: { columns: "full" } },
+    // Style choices offered in the add-card dialog; each becomes a key in the
+    // card config. First option is the default.
+    variants: [
+      {
+        key: "theme",
+        label: "Theme",
+        options: [
+          ["auto", "Match HA theme (auto)"],
+          ["dark", "Dark"],
+          ["light", "Light"],
+        ],
+      },
+      {
+        key: "settings",
+        label: "Settings layout",
+        options: [
+          ["drawer", "Compact — behind the ⚙ button"],
+          ["inline", "Always visible"],
+        ],
+      },
+    ],
   },
 ];
 
@@ -314,6 +335,15 @@ class MultiReefPanel extends HTMLElement {
           <select id="dash"><option>Loading…</option></select>
           <label>View</label>
           <select id="view"><option>—</option></select>
+          ${(device.entry.variants || [])
+            .map(
+              (v) => `
+          <label>${this._esc(v.label)}</label>
+          <select id="var-${this._esc(v.key)}">${v.options
+            .map(([val, text]) => `<option value="${this._esc(val)}">${this._esc(text)}</option>`)
+            .join("")}</select>`
+            )
+            .join("")}
           <div class="status" id="st"></div>
           <div class="row">
             <button class="btn ghost" id="cancel">Cancel</button>
@@ -403,6 +433,11 @@ class MultiReefPanel extends HTMLElement {
     const cfg = this._activeCfg;
     const view = cfg.views[Number(this.$("view").value)];
     const card = { type: device.entry.cardType, entity: device.anchorEntity, ...(device.entry.cardOptions || {}) };
+    // Fold in the chosen style variants (theme, settings layout, …).
+    for (const v of device.entry.variants || []) {
+      const sel = this.$(`var-${v.key}`);
+      if (sel && sel.value) card[v.key] = sel.value;
+    }
     if (!this._appendCard(view, card)) {
       this._status("err", "That view can't take a card (auto-generated layout).");
       return;
@@ -485,4 +520,4 @@ class MultiReefPanel extends HTMLElement {
 if (!customElements.get("multi-reef-panel")) {
   customElements.define("multi-reef-panel", MultiReefPanel);
 }
-console.info("%c MULTI-REEF-PANEL %c v0.2.0 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c MULTI-REEF-PANEL %c v0.4.0 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
