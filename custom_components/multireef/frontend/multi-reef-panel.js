@@ -26,6 +26,18 @@ const CATALOG = [
     anchorKeyword: "container_level",
     cardOptions: { grid_options: { columns: "full" } },
   },
+  {
+    id: "redsea-dose",
+    brand: "Red Sea",
+    name: "ReefDose",
+    icon: "mdi:water-plus",
+    cardType: "custom:reef-dose-card",
+    anchorDomain: "sensor",
+    // "head_1_" is unique to ReefDose entities (the RF doser also has a
+    // dosed_today sensor, so the head marker keeps the match unambiguous).
+    anchorKeyword: "head_1_dosed_today",
+    cardOptions: { grid_options: { columns: "full" } },
+  },
 ];
 
 const BLUE = "#3f8fd6";
