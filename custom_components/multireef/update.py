@@ -8,6 +8,7 @@ the bridge's /update endpoint — so a firmware update is a click in Home Assist
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -19,12 +20,13 @@ from homeassistant.components.update import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .ecotech.bridge import BridgeError
 from .ecotech.const import BRIDGE_FW_VERSION
 from .ecotech.coordinator import EcoTechCoordinator
-from .ecotech.entity import EcoTechBridgeEntity
+from .ecotech.entity import EcoTechBridgeEntity, bridge_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,5 +75,20 @@ class MobiusBridgeUpdate(EcoTechBridgeEntity, UpdateEntity):
             await self.coordinator.bridge.upload_firmware(data)
         except BridgeError as err:
             raise HomeAssistantError(f"Bridge firmware update failed: {err}") from err
-        # The bridge reboots; the new version is reflected on the next poll.
         _LOGGER.info("Pushed bridge firmware %s to %s", version, self.coordinator.host)
+        # The bridge reboots (~15-30s). Wait for it to answer again, then refresh so
+        # entities recover immediately (not after the 5-min poll) and update the hub
+        # device's shown firmware — otherwise everything reads Unavailable/stale for
+        # minutes right after an update.
+        for _ in range(30):  # up to ~60s
+            await asyncio.sleep(2)
+            try:
+                await self.coordinator.bridge.health()
+                break
+            except BridgeError:
+                continue
+        await self.coordinator.async_refresh()
+        dr.async_get(self.hass).async_get_or_create(
+            config_entry_id=self.coordinator.entry.entry_id,
+            **bridge_device_info(self.coordinator),
+        )
