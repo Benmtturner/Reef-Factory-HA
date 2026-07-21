@@ -366,6 +366,9 @@ class ReefDoseCard extends HTMLElement {
     return `
       :host { --blue:#2b7fff; --purple:#c05cf7; --ink:#1a1d26; --muted:#8b90a0;
               --track:#e8eaef; --chipbg:#f4f5f8; --line:#eceef3; }
+      /* Our display rules would otherwise beat the UA's [hidden] handling and
+         leave every head's detail permanently expanded. */
+      [hidden] { display:none !important; }
       .card { background:#fff; border-radius:24px; padding:20px 22px; color:var(--ink);
         font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
         box-shadow:0 8px 28px rgba(20,25,45,.10); }
