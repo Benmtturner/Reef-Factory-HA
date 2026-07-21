@@ -367,10 +367,10 @@ class ReefDoseCard extends HTMLElement {
       /* Our display rules would otherwise beat the UA's [hidden] handling and
          leave every head's detail permanently expanded. */
       [hidden] { display:none !important; }
-      /* Match the RF doser card's natural bulk so the two sit uniform side by
-         side, without touching the dashboard grid: fixed min-height, head rows
-         spaced through it (app-style); expanded details grow past it normally. */
-      ha-card { padding:16px; box-sizing:border-box; overflow:hidden; min-height:470px;
+      /* Match the RF doser card's height in its side-by-side layout, which is
+         set by its fixed 240px beaker + 16px padding top/bottom = 272px. Head
+         rows space through it (app-style); expanded details grow past it. */
+      ha-card { padding:16px; box-sizing:border-box; overflow:hidden; min-height:272px;
         display:flex; flex-direction:column; }
       .head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
       .name { font-size:1.15rem; font-weight:700; letter-spacing:-.01em; }
