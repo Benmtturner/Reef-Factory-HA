@@ -59,15 +59,6 @@ class ReefFactoryDoserCard extends HTMLElement {
     return 8;
   }
 
-  // Sections-view footprint shared by all Multi Reef cards (8 grid rows) so they
-  // sit uniform on a view; content scrolls internally if it ever exceeds it.
-  getGridOptions() {
-    return { columns: 12, rows: 8, min_columns: 6, min_rows: 4 };
-  }
-  getLayoutOptions() {
-    return { grid_columns: 12, grid_rows: 8, grid_min_columns: 6, grid_min_rows: 4 };
-  }
-
   set hass(hass) {
     this._hass = hass;
     this._resolve();
@@ -111,8 +102,7 @@ class ReefFactoryDoserCard extends HTMLElement {
     root.innerHTML = `
       <style>
         :host { --rf-blue:#3f8fd6; }
-        :host { display:block; height:100%; }
-        ha-card { padding:16px; box-sizing:border-box; height:100%; overflow-y:auto; }
+        ha-card { padding:16px; box-sizing:border-box; overflow:hidden; }
         .grid { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); grid-template-areas:"today beaker dosing" "refill beaker calibrate"; gap:14px 12px; align-items:start; }
         .grid > div { min-width:0; }
         @media (max-width:460px) {

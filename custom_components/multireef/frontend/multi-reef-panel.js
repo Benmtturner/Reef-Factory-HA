@@ -24,7 +24,7 @@ const CATALOG = [
     cardType: "custom:reef-factory-doser-card",
     anchorDomain: "sensor",
     anchorKeyword: "container_level",
-    cardOptions: { grid_options: { columns: "full", rows: 8 } },
+    cardOptions: { grid_options: { columns: "full" } },
   },
   {
     id: "redsea-dose",
@@ -36,7 +36,7 @@ const CATALOG = [
     // "head_1_" is unique to ReefDose entities (the RF doser also has a
     // dosed_today sensor, so the head marker keeps the match unambiguous).
     anchorKeyword: "head_1_dosed_today",
-    cardOptions: { grid_options: { columns: "full", rows: 8 } },
+    cardOptions: { grid_options: { columns: "full" } },
     // Style choices offered in the add-card dialog; each becomes a key in the
     // card config. First option is the default. (No theme choice — the card is
     // an ha-card, so it follows the dashboard theme like every Multi Reef card.)
@@ -512,4 +512,4 @@ class MultiReefPanel extends HTMLElement {
 if (!customElements.get("multi-reef-panel")) {
   customElements.define("multi-reef-panel", MultiReefPanel);
 }
-console.info("%c MULTI-REEF-PANEL %c v0.5.1 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c MULTI-REEF-PANEL %c v0.5.2 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
