@@ -1,7 +1,7 @@
 {
   "domain": "multireef",
   "name": "Multi Reef",
-  "version": "0.19.6",
+  "version": "0.20.0",
   "codeowners": [
     "@Benmtturner"
   ],

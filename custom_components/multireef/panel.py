@@ -1,9 +1,10 @@
-"""Multi Reef sidebar panel — the config engine (device → dashboard provisioning).
+"""Multi Reef sidebar panel — the integration's front door.
 
-The panel is a full-page custom element served by this integration and registered
-in the HA sidebar. All provisioning logic (list dashboards, splice a card into a
-view, save) runs client-side in the panel via ``hass.callWS`` against the Lovelace
-WebSocket API, so there is nothing to do here beyond serving + registering it.
+The panel is a full-page custom element (an ES-module app under
+``frontend/panel/``) served by this integration and registered in the HA
+sidebar. All panel logic runs client-side against the authenticated ``hass``
+object (WebSocket registries, Lovelace API, config-flow REST), so there is
+nothing to do here beyond serving the directory + registering the entry module.
 """
 
 from __future__ import annotations
@@ -14,17 +15,18 @@ from pathlib import Path
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.panel_custom import async_register_panel
 from homeassistant.core import HomeAssistant
+from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "multi-reef"
-PANEL_JS_URL = f"/{DOMAIN}/multi-reef-panel.js"
-_PANEL_FILE = "frontend/multi-reef-panel.js"
+# The whole panel directory is served so the entry's relative ES imports work.
+PANEL_ASSETS_URL = f"/{DOMAIN}/panel"
+_PANEL_DIR = "frontend/panel"
+_ENTRY = "multi-reef-panel.js"
 _WEBCOMPONENT = "multi-reef-panel"
-# Bump when the panel JS changes so the browser reloads it (?v= cache-buster).
-PANEL_VERSION = "0.5.2"
 
 
 async def async_register_multi_reef_panel(hass: HomeAssistant) -> None:
@@ -33,22 +35,37 @@ async def async_register_multi_reef_panel(hass: HomeAssistant) -> None:
     if hass.data.get(key):
         return
     hass.data[key] = True
-    js_path = Path(__file__).parent / _PANEL_FILE
+    panel_dir = Path(__file__).parent / _PANEL_DIR
+
+    # Cache-bust the entry on the integration version so a HACS update reloads
+    # the panel without a manual hard-refresh (same pattern as the cards).
+    # Submodules are served with cache_headers=False and revalidate on mtime.
+    try:
+        integration = await async_get_integration(hass, DOMAIN)
+        version = str(integration.version) if integration.version else "0"
+    except Exception:  # noqa: BLE001
+        version = "0"
+
     try:
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(PANEL_JS_URL, str(js_path), False)]
+            [StaticPathConfig(PANEL_ASSETS_URL, str(panel_dir), False)]
         )
-        await async_register_panel(
-            hass,
-            frontend_url_path=PANEL_URL_PATH,
-            webcomponent_name=_WEBCOMPONENT,
-            module_url=f"{PANEL_JS_URL}?v={PANEL_VERSION}",
-            sidebar_title="Multi Reef",
-            sidebar_icon="mdi:fishbowl",
-            require_admin=True,
-            embed_iframe=False,
-            trust_external=False,
-        )
-        _LOGGER.debug("Multi Reef panel registered at /%s", PANEL_URL_PATH)
+        kwargs = {
+            "frontend_url_path": PANEL_URL_PATH,
+            "webcomponent_name": _WEBCOMPONENT,
+            "module_url": f"{PANEL_ASSETS_URL}/{_ENTRY}?v={version}",
+            "sidebar_title": "Multi Reef",
+            "sidebar_icon": "mdi:fishbowl",
+            "require_admin": True,
+            "embed_iframe": False,
+            "trust_external": False,
+        }
+        try:
+            # The panel receives this as `panel.config` (About footer/banner).
+            await async_register_panel(hass, config={"version": version}, **kwargs)
+        except TypeError:
+            # Older HA without the config kwarg — register without it.
+            await async_register_panel(hass, **kwargs)
+        _LOGGER.debug("Multi Reef panel registered at /%s (v%s)", PANEL_URL_PATH, version)
     except Exception:  # noqa: BLE001 — a panel failure must never break the device
         _LOGGER.warning("Could not register the Multi Reef panel", exc_info=True)
