@@ -368,33 +368,34 @@ class ReefDoseCard extends HTMLElement {
          leave every head's detail permanently expanded. */
       [hidden] { display:none !important; }
       ha-card { padding:16px; box-sizing:border-box; overflow:hidden; }
-      .head { display:flex; align-items:flex-start; justify-content:space-between; }
-      .name { font-size:1.25rem; font-weight:700; letter-spacing:-.01em; }
-      .icons { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
-      .chip { width:36px; height:36px; border-radius:50%; background:var(--surface);
+      .head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+      .name { font-size:1.15rem; font-weight:700; letter-spacing:-.01em; }
+      .icons { display:flex; align-items:center; gap:10px; }
+      .chip { width:32px; height:32px; border-radius:50%; background:var(--surface);
         display:flex; align-items:center; justify-content:center; }
-      .chip ha-icon, .batt ha-icon, .pwr ha-icon { --mdc-icon-size:20px; }
+      .chip ha-icon { --mdc-icon-size:18px; }
+      .batt ha-icon, .pwr ha-icon { --mdc-icon-size:20px; }
       .batt { color:var(--error-color,#e2574c); }
       .pwr { background:none; border:none; cursor:pointer; padding:2px; color:var(--muted); }
       .pwr.off { color:var(--error-color,#e2574c); }
       .offline { color:var(--error-color,#e2574c); font-weight:700; margin:4px 0 0; }
-      .heads { display:flex; flex-direction:column; gap:18px; margin-top:14px; }
-      .hr { display:flex; align-items:center; gap:14px; cursor:pointer; }
+      .heads { display:flex; flex-direction:column; gap:12px; margin-top:12px; }
+      .hr { display:flex; align-items:center; gap:12px; cursor:pointer; }
       .main { flex:1; min-width:0; }
       .line1 { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
-      .supp { font-size:1.1rem; font-weight:600; }
-      .amounts b { font-size:1.45rem; font-weight:800; letter-spacing:-.02em;
+      .supp { font-size:1rem; font-weight:600; }
+      .amounts b { font-size:1.25rem; font-weight:800; letter-spacing:-.02em;
         font-variant-numeric:tabular-nums; }
-      .amounts i { font-style:normal; font-size:.85rem; font-weight:600; color:var(--muted); }
-      .amounts em { font-style:normal; font-size:.95rem; font-weight:600; color:var(--muted); margin-left:2px; }
-      .bar { position:relative; height:9px; border-radius:99px; background:var(--track);
-        overflow:hidden; margin-top:8px; }
+      .amounts i { font-style:normal; font-size:.8rem; font-weight:600; color:var(--muted); }
+      .amounts em { font-style:normal; font-size:.88rem; font-weight:600; color:var(--muted); margin-left:2px; }
+      .bar { position:relative; height:8px; border-radius:99px; background:var(--track);
+        overflow:hidden; margin-top:6px; }
       .auto { position:absolute; left:0; top:0; bottom:0; background:var(--mr-blue); border-radius:99px;
         transition:width .4s ease; }
       .manual { position:absolute; right:0; top:0; bottom:0; width:21%; background:var(--purple);
         border-radius:99px; box-shadow:-3px 0 0 0 var(--card-background-color,#1c1f24); }
-      .plus { text-align:right; color:var(--purple); font-weight:700; font-size:.9rem; margin-top:4px; }
-      .bottle { width:17px; height:26px; border-radius:4px 4px 5px 5px; background:var(--c);
+      .plus { text-align:right; color:var(--purple); font-weight:700; font-size:.85rem; margin-top:2px; }
+      .bottle { width:15px; height:23px; border-radius:4px 4px 5px 5px; background:var(--c);
         position:relative; flex:0 0 auto; box-shadow:inset 0 0 0 2px rgba(0,0,0,.12); }
       .bottle::before { content:""; position:absolute; top:-5px; left:4px; right:4px; height:5px;
         background:var(--c); border-radius:2px 2px 0 0; }
