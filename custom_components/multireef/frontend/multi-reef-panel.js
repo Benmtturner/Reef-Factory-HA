@@ -38,23 +38,15 @@ const CATALOG = [
     anchorKeyword: "head_1_dosed_today",
     cardOptions: { grid_options: { columns: "full" } },
     // Style choices offered in the add-card dialog; each becomes a key in the
-    // card config. First option is the default.
+    // card config. First option is the default. (No theme choice — the card is
+    // an ha-card, so it follows the dashboard theme like every Multi Reef card.)
     variants: [
       {
-        key: "theme",
-        label: "Theme",
-        options: [
-          ["auto", "Match HA theme (auto)"],
-          ["dark", "Dark"],
-          ["light", "Light"],
-        ],
-      },
-      {
         key: "settings",
-        label: "Settings layout",
+        label: "Head details",
         options: [
-          ["drawer", "Compact — behind the ⚙ button"],
-          ["inline", "Always visible"],
+          ["drawer", "Collapsed — tap a head to open"],
+          ["inline", "Always expanded"],
         ],
       },
     ],
@@ -520,4 +512,4 @@ class MultiReefPanel extends HTMLElement {
 if (!customElements.get("multi-reef-panel")) {
   customElements.define("multi-reef-panel", MultiReefPanel);
 }
-console.info("%c MULTI-REEF-PANEL %c v0.4.0 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");
+console.info("%c MULTI-REEF-PANEL %c v0.5.0 ", "background:#3f8fd6;color:#fff", "color:#3f8fd6");

@@ -58,19 +58,13 @@ class ReefDoseCard extends HTMLElement {
       throw new Error("reef-dose-card: set `entity` to any entity of your ReefDose");
     }
     this._config = config;
-    // theme: "auto" (follow HA dark mode) | "light" | "dark"
-    this._theme = config.theme || "auto";
+    // `theme` is accepted for back-compat but the frame is an <ha-card>, so it
+    // follows the dashboard theme automatically (same as the RF doser card).
     // settings: "inline" -> head details start expanded; "drawer" -> collapsed
     this._startOpen = config.settings === "inline";
     this._open = this._open || new Set();
     this._sig = null;
     this._update();
-  }
-
-  _isDark() {
-    if (this._theme === "dark") return true;
-    if (this._theme === "light") return false;
-    return !!this._hass?.themes?.darkMode;
   }
 
   getCardSize() {
@@ -158,7 +152,6 @@ class ReefDoseCard extends HTMLElement {
     if (!this._heads) return "";
     const parts = [
       this._name,
-      this._isDark() ? "d" : "l",
       this._val(this._device.automaticDosing),
       this._val(this._device.battery),
     ];
@@ -220,7 +213,7 @@ class ReefDoseCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>${this._css()}</style>
-      <div class="card ${this._isDark() ? "dark" : ""}">
+      <ha-card>
         <div class="head">
           <div class="name">${this._esc(this._name)}</div>
           <div class="icons">
@@ -236,7 +229,7 @@ class ReefDoseCard extends HTMLElement {
         <div class="heads">
           ${headNums.map((n) => this._headRow(n)).join("")}
         </div>
-      </div>`;
+      </ha-card>`;
 
     this._wire(headNums);
   }
@@ -364,75 +357,69 @@ class ReefDoseCard extends HTMLElement {
 
   _css() {
     return `
-      :host { --blue:#2b7fff; --purple:#c05cf7; --ink:#1a1d26; --muted:#8b90a0;
-              --track:#e8eaef; --chipbg:#f4f5f8; --line:#eceef3; }
+      /* Frame + palette match the other Multi Reef cards: an <ha-card> root that
+         takes the dashboard theme's background/radius/border, the shared Multi
+         Reef blue, and HA theme variables for every surface. */
+      :host { --mr-blue:var(--rf-blue,#3f8fd6); --purple:#c05cf7;
+              --muted:var(--secondary-text-color,#8b90a0);
+              --surface:color-mix(in srgb, var(--primary-text-color,#888) 7%, transparent);
+              --track:color-mix(in srgb, var(--primary-text-color,#888) 20%, transparent); }
       /* Our display rules would otherwise beat the UA's [hidden] handling and
          leave every head's detail permanently expanded. */
       [hidden] { display:none !important; }
-      .card { background:#fff; border-radius:24px; padding:20px 22px; color:var(--ink);
-        font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-        box-shadow:0 8px 28px rgba(20,25,45,.10); }
+      ha-card { padding:16px; box-sizing:border-box; overflow:hidden; }
       .head { display:flex; align-items:flex-start; justify-content:space-between; }
-      .name { font-size:1.45rem; font-weight:800; letter-spacing:-.02em; }
+      .name { font-size:1.25rem; font-weight:700; letter-spacing:-.01em; }
       .icons { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
-      .chip { width:38px; height:38px; border-radius:50%; background:var(--chipbg);
-        display:flex; align-items:center; justify-content:center; color:var(--ink); }
+      .chip { width:36px; height:36px; border-radius:50%; background:var(--surface);
+        display:flex; align-items:center; justify-content:center; }
       .chip ha-icon, .batt ha-icon, .pwr ha-icon { --mdc-icon-size:20px; }
-      .batt { color:#ef4444; }
+      .batt { color:var(--error-color,#e2574c); }
       .pwr { background:none; border:none; cursor:pointer; padding:2px; color:var(--muted); }
-      .pwr.off { color:#ef4444; }
-      .offline { color:#ef4444; font-weight:800; margin:4px 0 0; }
-      .heads { display:flex; flex-direction:column; gap:20px; margin-top:18px; }
-      .row {}
+      .pwr.off { color:var(--error-color,#e2574c); }
+      .offline { color:var(--error-color,#e2574c); font-weight:700; margin:4px 0 0; }
+      .heads { display:flex; flex-direction:column; gap:18px; margin-top:14px; }
       .hr { display:flex; align-items:center; gap:14px; cursor:pointer; }
       .main { flex:1; min-width:0; }
       .line1 { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
-      .supp { font-size:1.15rem; font-weight:600; }
-      .amounts b { font-size:1.5rem; font-weight:800; letter-spacing:-.02em;
+      .supp { font-size:1.1rem; font-weight:600; }
+      .amounts b { font-size:1.45rem; font-weight:800; letter-spacing:-.02em;
         font-variant-numeric:tabular-nums; }
       .amounts i { font-style:normal; font-size:.85rem; font-weight:600; color:var(--muted); }
       .amounts em { font-style:normal; font-size:.95rem; font-weight:600; color:var(--muted); margin-left:2px; }
       .bar { position:relative; height:9px; border-radius:99px; background:var(--track);
         overflow:hidden; margin-top:8px; }
-      .auto { position:absolute; left:0; top:0; bottom:0; background:var(--blue); border-radius:99px;
+      .auto { position:absolute; left:0; top:0; bottom:0; background:var(--mr-blue); border-radius:99px;
         transition:width .4s ease; }
       .manual { position:absolute; right:0; top:0; bottom:0; width:21%; background:var(--purple);
-        border-radius:99px; box-shadow:-3px 0 0 0 var(--track); }
+        border-radius:99px; box-shadow:-3px 0 0 0 var(--card-background-color,#1c1f24); }
       .plus { text-align:right; color:var(--purple); font-weight:700; font-size:.9rem; margin-top:4px; }
       .bottle { width:17px; height:26px; border-radius:4px 4px 5px 5px; background:var(--c);
-        position:relative; flex:0 0 auto; box-shadow:inset 0 0 0 2px rgba(0,0,0,.08); }
+        position:relative; flex:0 0 auto; box-shadow:inset 0 0 0 2px rgba(0,0,0,.12); }
       .bottle::before { content:""; position:absolute; top:-5px; left:4px; right:4px; height:5px;
         background:var(--c); border-radius:2px 2px 0 0; }
-      .detail { margin-top:12px; padding:14px; border-radius:14px; background:var(--chipbg);
+      .detail { margin-top:12px; padding:14px; border-radius:10px; background:var(--surface);
         display:flex; flex-direction:column; gap:12px; }
       .chips { display:flex; flex-wrap:wrap; gap:8px; }
-      .c { background:#fff; border-radius:10px; padding:6px 10px; font-size:.8rem; font-weight:600; color:#41465a; }
+      .c { background:var(--card-background-color,#1c1f24); border-radius:8px; padding:6px 10px;
+        font-size:.8rem; font-weight:600; color:var(--muted); }
       .actions { display:flex; gap:8px; }
-      .dose { background:var(--blue); color:#fff; border:none; border-radius:12px; padding:10px 16px;
-        font-weight:700; cursor:pointer; flex:1; font-size:.9rem; }
-      .dose:hover { filter:brightness(1.05); }
-      .tgl { background:#fff; border:1.5px solid var(--line); border-radius:12px; padding:9px 12px;
-        font-weight:700; cursor:pointer; color:var(--muted); font-size:.82rem; }
-      .tgl.on { border-color:var(--blue); color:var(--blue); background:rgba(43,127,255,.06); }
+      .dose { background:var(--mr-blue); color:#fff; border:none; border-radius:6px; padding:11px 16px;
+        font-weight:600; cursor:pointer; flex:1; font-size:.9rem;
+        transition:filter .15s ease, transform .1s ease; }
+      .dose:hover { filter:brightness(1.08); } .dose:active { transform:translateY(1px); }
+      .tgl { background:transparent; border:1px solid var(--divider-color,#555); border-radius:6px;
+        padding:9px 12px; font-weight:600; cursor:pointer; color:var(--muted); font-size:.82rem; }
+      .tgl.on { border-color:var(--mr-blue); color:var(--mr-blue);
+        background:color-mix(in srgb, var(--mr-blue) 10%, transparent); }
       .inputs { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
       .inputs label { display:flex; flex-direction:column; gap:4px; font-size:.72rem; font-weight:700; color:var(--muted); }
-      .inputs input { border:1.5px solid var(--line); border-radius:10px; padding:8px; font-size:.95rem;
-        font-weight:600; font-family:inherit; min-width:0; background:#fff; color:var(--ink); }
-      .inputs input:focus { outline:none; border-color:var(--blue); }
+      .inputs input { border:1px solid var(--divider-color,#555); border-radius:6px; padding:9px;
+        font-size:.95rem; font-weight:600; font-family:inherit; min-width:0; box-sizing:border-box;
+        width:100%; background:var(--primary-background-color,#111); color:var(--primary-text-color,#eee); }
+      .inputs input:focus { outline:none; border-color:var(--mr-blue); }
       .minor { display:flex; gap:8px; flex-wrap:wrap; }
       @media (max-width:420px) { .inputs { grid-template-columns:1fr 1fr; } }
-
-      /* --- dark: matched to the ReefBeat home card --- */
-      .card.dark { --ink:#f4f6f8; --muted:#9aa0a8; --track:#5a5e66; --chipbg:#34383f;
-        --line:#3d414a; --blue:#2f7bf6; background:#2b2e34;
-        box-shadow:0 12px 32px rgba(0,0,0,.5); }
-      .card.dark .chip { background:#3a3e46; color:#fff; }
-      .card.dark .c { background:#2b2e34; color:#c8cdd6; }
-      .card.dark .tgl { background:#2b2e34; }
-      .card.dark .tgl.on { background:rgba(47,123,246,.16); color:#8bb6ff; }
-      .card.dark .inputs input { background:#24272d; }
-      .card.dark .detail { background:#24272d; }
-      .card.dark .manual { box-shadow:-3px 0 0 0 #2b2e34; }
     `;
   }
 }
