@@ -68,7 +68,17 @@ class ReefDoseCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 3;
+    return 7;
+  }
+
+  // Sections-view footprint: match the RF doser card (8 grid rows) so Multi Reef
+  // cards sit uniform on a view; the card stretches to fill (app-style spacing)
+  // and scrolls internally if expanded details exceed it. Resizable in the UI.
+  getGridOptions() {
+    return { columns: 12, rows: 8, min_columns: 6, min_rows: 4 };
+  }
+  getLayoutOptions() {
+    return { grid_columns: 12, grid_rows: 8, grid_min_columns: 6, grid_min_rows: 4 };
   }
 
   set hass(hass) {
@@ -367,7 +377,9 @@ class ReefDoseCard extends HTMLElement {
       /* Our display rules would otherwise beat the UA's [hidden] handling and
          leave every head's detail permanently expanded. */
       [hidden] { display:none !important; }
-      ha-card { padding:16px; box-sizing:border-box; overflow:hidden; }
+      :host { display:block; height:100%; }
+      ha-card { padding:16px; box-sizing:border-box; height:100%;
+        display:flex; flex-direction:column; overflow-y:auto; }
       .head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
       .name { font-size:1.15rem; font-weight:700; letter-spacing:-.01em; }
       .icons { display:flex; align-items:center; gap:10px; }
@@ -379,7 +391,8 @@ class ReefDoseCard extends HTMLElement {
       .pwr { background:none; border:none; cursor:pointer; padding:2px; color:var(--muted); }
       .pwr.off { color:var(--error-color,#e2574c); }
       .offline { color:var(--error-color,#e2574c); font-weight:700; margin:4px 0 0; }
-      .heads { display:flex; flex-direction:column; gap:12px; margin-top:12px; }
+      .heads { display:flex; flex-direction:column; gap:12px; margin-top:12px;
+        flex:1; justify-content:space-evenly; }
       .hr { display:flex; align-items:center; gap:12px; cursor:pointer; }
       .main { flex:1; min-width:0; }
       .line1 { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
