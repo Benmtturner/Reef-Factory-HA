@@ -9,7 +9,7 @@
 import { navigate } from "./util.js";
 import { tokens, baseStyles } from "./styles.js";
 import "./tabs.js";
-import "./views/legacy-devices-view.js";
+import "./views/devices-view.js";
 import "./views/automations-view.js";
 
 const TABS = [
@@ -20,7 +20,7 @@ const DEFAULT_TAB = "devices";
 // Tab id -> element tag; views are created on first activation, then kept
 // alive ([hidden]) so search/scroll state survives tab switches.
 const VIEW_TAGS = {
-  devices: "mr-legacy-devices",
+  devices: "mr-devices-view",
   automations: "mr-automations-view",
 };
 
@@ -108,9 +108,11 @@ class MultiReefPanel extends HTMLElement {
     const host = this.shadowRoot.getElementById("viewhost");
     if (!this._views[tab]) {
       const el = document.createElement(VIEW_TAGS[tab]);
+      const version = this._panelCfg?.config?.version;
+      if (version) el.setAttribute("data-version", version);
       this._views[tab] = el;
       host.appendChild(el);
-      if (this._hass && tab === "devices") el.hass = this._hass;
+      if (this._hass && "hass" in el) el.hass = this._hass;
     }
     for (const [id, el] of Object.entries(this._views)) {
       el.hidden = id !== tab;
