@@ -102,8 +102,10 @@ class MrDevicesView extends HTMLElement {
         .foot { margin-top:26px; padding-top:16px; border-top:1px solid var(--mr-line);
                 color:var(--mr-muted); font-size:.78rem; display:flex; gap:14px; align-items:center; }
         .foot a { color:var(--mr-muted); }
+        :host([narrow]) .toolbar { flex-direction:column; align-items:stretch; }
         :host([narrow]) .row { flex-wrap:wrap; }
         :host([narrow]) .area { order:3; }
+        :host([narrow]) .ghead .gbtn { display:none; }
       </style>
       <div class="toolbar">
         <div class="search">

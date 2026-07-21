@@ -20,6 +20,12 @@ class MrProvisionDialog extends HTMLElement {
     this._anchor = anchorEntity;
     this._onDone = onDone;
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (!this._escHandler) {
+      this._escHandler = (e) => {
+        if (e.key === "Escape") this.close();
+      };
+    }
+    window.addEventListener("keydown", this._escHandler);
     this.shadowRoot.innerHTML = `
       <style>${tokens}${baseStyles}${buttonStyles}${dialogStyles}</style>
       <div class="modal" id="ov">
@@ -149,6 +155,7 @@ class MrProvisionDialog extends HTMLElement {
   }
 
   close() {
+    window.removeEventListener("keydown", this._escHandler);
     if (this.shadowRoot) this.shadowRoot.innerHTML = "";
     this._activeCfg = null;
     if (this._onDone) this._onDone();

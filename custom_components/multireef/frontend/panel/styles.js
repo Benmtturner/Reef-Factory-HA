@@ -49,7 +49,12 @@ export const dialogStyles = `
            padding: 16px; }
   .dialog { background: var(--ha-card-background, var(--mr-surface));
             border-radius: var(--mr-radius); padding: 22px; width: min(94vw, 440px);
+            max-height: 88vh; overflow-y: auto; box-sizing: border-box;
             box-shadow: 0 16px 50px rgba(0,0,0,.5); }
+  @media (max-width: 600px) {
+    .modal { padding: 10px; align-items: flex-end; }
+    .dialog { width: 100%; max-height: 92vh; border-radius: 14px 14px 0 0; }
+  }
   .dialog h3 { margin: 0 0 4px; font-size: 1.15rem; }
   .dialog .sub { color: var(--mr-muted); font-size: .85rem; margin: 0 0 16px; }
   .dialog label { display: block; font-size: .74rem; text-transform: uppercase;

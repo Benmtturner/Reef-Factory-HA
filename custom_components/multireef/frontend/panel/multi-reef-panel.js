@@ -34,8 +34,12 @@ class MultiReefPanel extends HTMLElement {
     }
   }
   set narrow(v) {
-    this.toggleAttribute("narrow", !!v);
-    this._tabsEl?.toggleAttribute("narrow", !!v);
+    this._narrow = !!v;
+    this.toggleAttribute("narrow", this._narrow);
+    this._tabsEl?.toggleAttribute("narrow", this._narrow);
+    for (const el of Object.values(this._views || {})) {
+      el.toggleAttribute("narrow", this._narrow);
+    }
   }
   set route(v) {
     this._route = v;
@@ -110,6 +114,7 @@ class MultiReefPanel extends HTMLElement {
       const el = document.createElement(VIEW_TAGS[tab]);
       const version = this._panelCfg?.config?.version;
       if (version) el.setAttribute("data-version", version);
+      if (this._narrow) el.setAttribute("narrow", "");
       this._views[tab] = el;
       host.appendChild(el);
       if (this._hass && "hass" in el) el.hass = this._hass;

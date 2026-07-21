@@ -19,7 +19,14 @@ class MrWizard extends HTMLElement {
     this._menuChoice = menuChoice;
     this._flowId = null;
     this._closed = false;
+    this._finished = false;
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (!this._escHandler) {
+      this._escHandler = (e) => {
+        if (e.key === "Escape") this.close();
+      };
+    }
+    window.addEventListener("keydown", this._escHandler);
     // Preload backend translations for nicer copy (best-effort).
     try {
       await this._hass.loadBackendTranslation?.("config", "multireef");
@@ -41,6 +48,13 @@ class MrWizard extends HTMLElement {
 
   close() {
     this._closed = true;
+    window.removeEventListener("keydown", this._escHandler);
+    if (this._progressUnsub) {
+      try {
+        this._progressUnsub();
+      } catch (_) {}
+      this._progressUnsub = null;
+    }
     if (this._flowId && !this._finished) {
       abortFlow(this._hass, this._flowId).catch(() => {});
     }
@@ -286,9 +300,8 @@ class MrWizard extends HTMLElement {
       this.open({ store: this._store, menuChoice: this._menuChoice });
     };
     this.shadowRoot.getElementById("done").onclick = () => {
-      this._closed = true;
-      this.shadowRoot.innerHTML = "";
       fireEvent(this, "wizard-done", {});
+      this.close(); // _finished is set, so no abort fires
     };
   }
 
@@ -301,10 +314,7 @@ class MrWizard extends HTMLElement {
       <button class="btn ghost" id="over" style="flex:1">Start over</button>
       <button class="btn" id="cl" style="flex:1">Close</button>`;
     this.shadowRoot.getElementById("over").onclick = () => this._restart();
-    this.shadowRoot.getElementById("cl").onclick = () => {
-      this._closed = true;
-      this.shadowRoot.innerHTML = "";
-    };
+    this.shadowRoot.getElementById("cl").onclick = () => this.close();
   }
 
   _renderError(err) {
