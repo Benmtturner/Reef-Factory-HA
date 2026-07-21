@@ -13,6 +13,7 @@ import { MultiReefStore } from "../store.js";
 import { addableBrands } from "../catalog.js";
 import "./bridges-section.js";
 import "../provision/provision-dialog.js";
+import "../wizard/wizard.js";
 
 const COLLAPSE_KEY = "multireef.panel.collapse";
 const AUTOCOLLAPSE_OVER = 30;
@@ -116,6 +117,7 @@ class MrDevicesView extends HTMLElement {
       <mr-bridges-section id="bridges"></mr-bridges-section>
       <div class="foot" id="foot"></div>
       <mr-provision-dialog id="prov"></mr-provision-dialog>
+      <mr-wizard id="wizard"></mr-wizard>
     `;
 
     this.$("search").addEventListener("input", (e) => this._onSearch(e.target.value));
@@ -360,7 +362,6 @@ class MrDevicesView extends HTMLElement {
   }
 
   _openWizard(menuChoice) {
-    // P3 mounts <mr-wizard>; until then, fall back to HA's add-integration page.
     const wiz = this.$("wizard");
     if (wiz && wiz.open) return wiz.open({ store: this._store, menuChoice });
     navigate("/config/integrations/dashboard/add?domain=multireef");
