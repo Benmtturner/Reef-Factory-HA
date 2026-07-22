@@ -16,6 +16,13 @@ MODEL_DOSE4 = "RSDOSE4"
 DOSER_HEADS: dict[str, int] = {MODEL_DOSE2: 2, MODEL_DOSE4: 4}
 DOSER_MODELS: dict[str, str] = {MODEL_DOSE2: "ReefDose 2", MODEL_DOSE4: "ReefDose 4"}
 
+# Auto top-off. The model string really is "RSATO+" (literal plus) in /device-info.
+MODEL_ATO = "RSATO+"
+ATO_MODELS: dict[str, str] = {MODEL_ATO: "ReefATO+"}
+
+# Everything the redsea family can set up, for discovery + config-flow labels.
+SUPPORTED_MODELS: dict[str, str] = {**DOSER_MODELS, **ATO_MODELS}
+
 # Every ReefBeat model-ID prefix, used to recognise devices during a discovery
 # scan. Only dosers are controllable so far; the rest are listed so a scan can
 # still report them (future families extend this).

@@ -167,8 +167,12 @@ def _parse_head(index: int, hs: dict[str, Any], dh: dict[str, Any]) -> HeadState
     )
 
 
-class ReefDoseClient:
-    """Client for one ReefDose, addressed by host (IP or hostname)."""
+class ReefBeatClient:
+    """Base HTTP client for any ReefBeat device, addressed by host (IP/hostname).
+
+    Holds the serialising lock + JSON GET/send helpers; device families subclass
+    it with their own endpoint reads (ReefDoseClient here, ReefAtoClient in ato.py).
+    """
 
     def __init__(self, session: aiohttp.ClientSession, host: str) -> None:
         self._session = session
@@ -214,6 +218,10 @@ class ReefDoseClient:
     async def device_info(self) -> dict[str, Any]:
         result = await self._get("/device-info")
         return result if isinstance(result, dict) else {}
+
+
+class ReefDoseClient(ReefBeatClient):
+    """Client for one ReefDose (RSDOSE2/RSDOSE4)."""
 
     async def fetch_state(
         self,

@@ -1,8 +1,8 @@
 """Entity bases for the Red Sea (ReefBeat) family.
 
-One HA device per physical ReefDose; its dosing heads are entities named
-"Head N …". Identity is the device's ``hwid`` (a stable MAC — Red Sea addresses
-don't roll like EcoTech's).
+One HA device per physical ReefBeat unit (ReefDose, ReefATO+). A doser's heads
+are entities named "Head N …". Identity is the device's ``hwid`` (a stable MAC —
+Red Sea addresses don't roll like EcoTech's).
 """
 
 from __future__ import annotations
@@ -16,12 +16,15 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..const import DOMAIN
 from .api import HeadState
+from .ato import RedSeaAtoCoordinator
 from .const import MANUFACTURER
 from .coordinator import RedSeaDoserCoordinator
 
 
-def doser_device_info(coordinator: RedSeaDoserCoordinator) -> DeviceInfo:
-    """The ReefDose as a single HA device."""
+def redsea_device_info(
+    coordinator: RedSeaDoserCoordinator | RedSeaAtoCoordinator,
+) -> DeviceInfo:
+    """A ReefBeat unit as a single HA device (both coordinators share the attrs)."""
     connections: set[tuple[str, str]] = set()
     if coordinator.hwid:
         connections = {(CONNECTION_NETWORK_MAC, format_mac(coordinator.hwid))}
@@ -44,7 +47,7 @@ class RedSeaDoserEntity(CoordinatorEntity[RedSeaDoserCoordinator]):
     def __init__(self, coordinator: RedSeaDoserCoordinator, key: str) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.hwid or coordinator.host}_{key}"
-        self._attr_device_info = doser_device_info(coordinator)
+        self._attr_device_info = redsea_device_info(coordinator)
 
 
 class RedSeaHeadEntity(RedSeaDoserEntity):
@@ -65,3 +68,14 @@ class RedSeaHeadEntity(RedSeaDoserEntity):
     @property
     def available(self) -> bool:
         return bool(super().available and self._head_state is not None)
+
+
+class RedSeaAtoEntity(CoordinatorEntity[RedSeaAtoCoordinator]):
+    """Base for a ReefATO+ entity."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: RedSeaAtoCoordinator, key: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.hwid or coordinator.host}_{key}"
+        self._attr_device_info = redsea_device_info(coordinator)

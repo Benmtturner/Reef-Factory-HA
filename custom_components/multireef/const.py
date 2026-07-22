@@ -35,6 +35,14 @@ REDSEA_PLATFORMS: list[Platform] = [
     Platform.SWITCH,
 ]
 
+# A ReefATO+ is monitoring-first (read-only for now): sensors (temperature,
+# fills, water level), binary sensors (leak, pump, sensor health), refresh button.
+REDSEA_ATO_PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+]
+
 # LAN WebSocket transport.
 WS_PATH = "controler"  # single-l typo is hardcoded in the device firmware
 WS_SUBPROTOCOL = "arduino"
@@ -76,9 +84,10 @@ CONF_ENTRY_TYPE = "entry_type"
 ENTRY_TYPE_ECOTECH_BRIDGE = "ecotech_bridge"
 CONF_BRIDGE_HOST = "bridge_host"
 
-# Red Sea (ReefBeat) device entries — one config entry per device (a ReefDose for
-# now). CONF_HOST holds the IP; hwid/model are stored for identity + head count.
+# Red Sea (ReefBeat) device entries — one config entry per device. CONF_HOST
+# holds the IP; hwid/model are stored for identity + head count.
 ENTRY_TYPE_REDSEA_DOSER = "redsea_doser"
+ENTRY_TYPE_REDSEA_ATO = "redsea_ato"
 CONF_REDSEA_HWID = "redsea_hwid"
 CONF_REDSEA_MODEL = "redsea_model"
 

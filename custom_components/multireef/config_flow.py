@@ -34,6 +34,7 @@ from .const import (
     CONF_REDSEA_MODEL,
     CONF_SERIAL,
     ENTRY_TYPE_ECOTECH_BRIDGE,
+    ENTRY_TYPE_REDSEA_ATO,
     ENTRY_TYPE_REDSEA_DOSER,
     MODELS,
     DOMAIN,
@@ -42,7 +43,7 @@ from .coordinator import async_probe, async_scan
 from .ecotech.bridge import MobiusBridge
 from .ecotech.const import DEFAULT_BRIDGE_HOST
 from .protocol import DeviceConfig, detect_family
-from .redsea.const import DOSER_HEADS, DOSER_MODELS
+from .redsea.const import DOSER_MODELS, SUPPORTED_MODELS
 from .redsea.coordinator import async_probe_doser, async_scan_dosers
 
 
@@ -159,7 +160,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_redsea(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Scan the network for ReefDose devices, then pick or enter manually."""
+        """Scan the network for ReefBeat devices, then pick or enter manually."""
         found = await async_scan_dosers(self.hass)
         configured = self._async_current_ids()
         self._redsea = {
@@ -174,7 +175,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_redsea_pick(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Choose one of the discovered ReefDose devices."""
+        """Choose one of the discovered ReefBeat devices."""
         if user_input is not None:
             choice = user_input[CONF_HOST]
             if choice == MANUAL:
@@ -185,7 +186,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
             return self._create_redsea_entry(choice, info)
 
         options = {
-            ip: f"{DOSER_MODELS.get(info.get('hw_model', ''), 'ReefDose')} — {ip}"
+            ip: f"{SUPPORTED_MODELS.get(info.get('hw_model', ''), 'ReefBeat device')} — {ip}"
             for ip, info in self._redsea.items()
         }
         options[MANUAL] = "Enter IP address manually…"
@@ -197,7 +198,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_redsea_manual(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manual IP entry for a ReefDose (reliable fallback)."""
+        """Manual IP entry for a ReefBeat device (reliable fallback)."""
         errors: dict[str, str] = {}
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
@@ -207,7 +208,7 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Failed to probe ReefDose %s", host)
                 errors["base"] = "cannot_connect"
             else:
-                if str(info.get("hw_model") or "") not in DOSER_HEADS:
+                if str(info.get("hw_model") or "") not in SUPPORTED_MODELS:
                     errors["base"] = "not_supported"
                 else:
                     await self.async_set_unique_id(info.get("hwid") or host)
@@ -218,13 +219,16 @@ class KhConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     def _create_redsea_entry(self, host: str, info: dict) -> ConfigFlowResult:
-        """Create the config entry for a confirmed ReefDose."""
+        """Create the config entry for a confirmed ReefBeat device."""
         model = str(info.get("hw_model") or "RSDOSE2")
-        title = info.get("name") or DOSER_MODELS.get(model, "ReefDose")
+        title = info.get("name") or SUPPORTED_MODELS.get(model, "ReefBeat device")
+        entry_type = (
+            ENTRY_TYPE_REDSEA_DOSER if model in DOSER_MODELS else ENTRY_TYPE_REDSEA_ATO
+        )
         return self.async_create_entry(
             title=title,
             data={
-                CONF_ENTRY_TYPE: ENTRY_TYPE_REDSEA_DOSER,
+                CONF_ENTRY_TYPE: entry_type,
                 CONF_HOST: host,
                 CONF_REDSEA_HWID: info.get("hwid", ""),
                 CONF_REDSEA_MODEL: model,

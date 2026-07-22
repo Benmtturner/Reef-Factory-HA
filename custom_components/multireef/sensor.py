@@ -13,7 +13,12 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfTemperature,
+    UnitOfVolume,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -26,8 +31,9 @@ from .ecotech.entity import EcoTechBridgeEntity, EcoTechDeviceEntity
 from .entity import KhEntity
 from .protocol import KH_CIRCUIT_INDEX_LABELS, MEASUREMENT_STATES, DpState
 from .redsea.api import HeadState
+from .redsea.ato import AtoState, RedSeaAtoCoordinator
 from .redsea.coordinator import RedSeaDoserCoordinator
-from .redsea.entity import RedSeaDoserEntity, RedSeaHeadEntity
+from .redsea.entity import RedSeaAtoEntity, RedSeaDoserEntity, RedSeaHeadEntity
 
 
 async def async_setup_entry(
@@ -60,6 +66,21 @@ async def async_setup_entry(
             rs.append(RedSeaNextDoseSensor(coordinator, head))
             rs.append(RedSeaLastCalibratedSensor(coordinator, head))
         async_add_entities(rs)
+        return
+
+    if isinstance(coordinator, RedSeaAtoCoordinator):
+        ato: list[SensorEntity] = [
+            RedSeaAtoSensor(coordinator, desc) for desc in REDSEA_ATO_SENSORS
+        ]
+        ato.append(RedSeaAtoLastFillSensor(coordinator))
+        # Reservoir monitor sensors only exist once an RVM reservoir is set up in
+        # the app — until then the device reports null for both.
+        state = coordinator.data
+        if state and state.days_till_empty is not None:
+            ato.append(RedSeaAtoSensor(coordinator, ATO_DAYS_TILL_EMPTY))
+        if state and state.volume_left_ml is not None:
+            ato.append(RedSeaAtoSensor(coordinator, ATO_VOLUME_LEFT))
+        async_add_entities(ato)
         return
 
     if coordinator.family == FAMILY_DP:
@@ -658,3 +679,145 @@ class RedSeaBatterySensor(RedSeaDoserEntity, SensorEntity):
     @property
     def native_value(self) -> StateType:
         return self.coordinator.data.battery_level if self.coordinator.data else None
+
+
+# ---------------------------------------------------------------------------
+# Red Sea ReefATO+ sensors — temperature first, then fill/level statistics
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, kw_only=True)
+class RedSeaAtoSensorDescription(SensorEntityDescription):
+    """Describes a ReefATO+ sensor with a value extractor."""
+
+    value_fn: Callable[[AtoState], StateType]
+    attrs_fn: Callable[[AtoState], dict[str, Any]] | None = None
+
+
+REDSEA_ATO_SENSORS: tuple[RedSeaAtoSensorDescription, ...] = (
+    RedSeaAtoSensorDescription(
+        key="temperature",
+        name="Temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=lambda s: s.temperature,
+        # The app's configured comfort bands, so automations/cards can colour by
+        # them without hardcoding thresholds.
+        attrs_fn=lambda s: {
+            "probe_connected": s.temp_probe_connected,
+            "desired_range": [s.temp_desired_low, s.temp_desired_high],
+            "acceptable_range": [s.temp_acceptable_low, s.temp_acceptable_high],
+        },
+    ),
+    RedSeaAtoSensorDescription(
+        key="water_level",
+        name="Water Level",
+        icon="mdi:waves-arrow-up",
+        value_fn=lambda s: s.sensor_level,
+        attrs_fn=lambda s: {"raw_level": s.water_level},
+    ),
+    RedSeaAtoSensorDescription(
+        key="fills_today",
+        name="Fills Today",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:water-plus",
+        value_fn=lambda s: s.today_fills,
+        attrs_fn=lambda s: {"daily_average": s.daily_fills_average},
+    ),
+    RedSeaAtoSensorDescription(
+        key="water_used_today",
+        name="Water Used Today",
+        device_class=SensorDeviceClass.WATER,
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        suggested_display_precision=2,
+        value_fn=lambda s: round(s.today_volume_ml / 1000, 3),
+    ),
+    RedSeaAtoSensorDescription(
+        key="daily_average_usage",
+        name="Daily Average Usage",
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:chart-line",
+        suggested_display_precision=2,
+        value_fn=lambda s: round(s.daily_volume_average_ml / 1000, 3),
+    ),
+    RedSeaAtoSensorDescription(
+        key="total_fills",
+        name="Total Fills",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:counter",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda s: s.total_fills,
+    ),
+    RedSeaAtoSensorDescription(
+        key="total_water_used",
+        name="Total Water Used",
+        device_class=SensorDeviceClass.WATER,
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        suggested_display_precision=1,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda s: round(s.total_volume_ml / 1000, 2),
+    ),
+)
+
+# Only added when the device actually reports them (RVM reservoir configured).
+ATO_DAYS_TILL_EMPTY = RedSeaAtoSensorDescription(
+    key="days_till_empty",
+    name="Days Till Empty",
+    native_unit_of_measurement="d",
+    icon="mdi:calendar-clock",
+    value_fn=lambda s: s.days_till_empty,
+)
+ATO_VOLUME_LEFT = RedSeaAtoSensorDescription(
+    key="volume_left",
+    name="Reservoir Left",
+    native_unit_of_measurement=UnitOfVolume.LITERS,
+    icon="mdi:cup-water",
+    suggested_display_precision=2,
+    value_fn=lambda s: (
+        round(s.volume_left_ml / 1000, 3) if s.volume_left_ml is not None else None
+    ),
+)
+
+
+class RedSeaAtoSensor(RedSeaAtoEntity, SensorEntity):
+    """A single decoded ReefATO+ sensor."""
+
+    entity_description: RedSeaAtoSensorDescription
+
+    def __init__(self, coordinator, description: RedSeaAtoSensorDescription) -> None:
+        super().__init__(coordinator, description.key)
+        self.entity_description = description
+
+    @property
+    def native_value(self) -> StateType:
+        state = self.coordinator.data
+        return self.entity_description.value_fn(state) if state else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data
+        fn = self.entity_description.attrs_fn
+        return fn(state) if (state and fn) else {}
+
+
+class RedSeaAtoLastFillSensor(RedSeaAtoEntity, SensorEntity):
+    """When the ATO last topped the tank off."""
+
+    _attr_name = "Last Fill"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:history"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "last_fill")
+
+    @property
+    def native_value(self) -> datetime | None:
+        state = self.coordinator.data
+        if state is None or state.last_fill_ts <= 0:
+            return None
+        return dt_util.utc_from_timestamp(state.last_fill_ts)

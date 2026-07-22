@@ -6,7 +6,7 @@
         "menu_options": {
           "reef_factory": "Reef Factory device (KH Keeper, doser)",
           "bridge": "EcoTech bridge (VorTech, Radion…)",
-          "redsea": "Red Sea (ReefDose…)"
+          "redsea": "Red Sea (ReefDose, ReefATO+…)"
         }
       },
       "bridge": {
@@ -17,15 +17,15 @@
         }
       },
       "redsea_pick": {
-        "title": "Select your ReefDose",
-        "description": "These Red Sea ReefDose dosers were found on your network. Pick one, or choose manual entry.",
+        "title": "Select your Red Sea device",
+        "description": "These Red Sea ReefBeat devices were found on your network. Pick one, or choose manual entry.",
         "data": {
           "host": "Device"
         }
       },
       "redsea_manual": {
-        "title": "Enter ReefDose IP",
-        "description": "No ReefDose was found automatically, or you chose manual entry. Enter its LAN IP address. Reserve a static IP for it in your router first.",
+        "title": "Enter Red Sea device IP",
+        "description": "No Red Sea device was found automatically, or you chose manual entry. Enter its LAN IP address. Reserve a static IP for it in your router first.",
         "data": {
           "host": "IP address",
           "name": "Name (optional)"
@@ -49,7 +49,7 @@
     },
     "error": {
       "cannot_connect": "Could not reach the device. Check the IP and that it is on the same network.",
-      "not_supported": "That device responded but is not a supported device for this option (Reef Factory serials start with RFKH/RFDP; Red Sea must be a ReefDose)."
+      "not_supported": "That device responded but is not a supported device for this option (Reef Factory serials start with RFKH/RFDP; Red Sea must be a ReefDose or ReefATO+)."
     },
     "abort": {
       "already_configured": "This device is already configured.",

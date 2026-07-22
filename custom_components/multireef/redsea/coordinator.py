@@ -34,13 +34,14 @@ from .const import (
     REQUEST_TIMEOUT,
     SCAN_CONCURRENCY,
     SCAN_TIMEOUT,
+    SUPPORTED_MODELS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_probe_doser(hass: HomeAssistant, host: str) -> dict[str, Any]:
-    """Read /device-info for one host and return it if it's a ReefDose.
+    """Read /device-info for one host and return it if it's a ReefBeat device.
 
     Raises on connection failure. Returns the device-info dict (caller checks the
     model). Used by the config flow's manual-entry path.
@@ -78,11 +79,12 @@ async def _probe_quiet(
 
 
 async def async_scan_dosers(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
-    """Scan the HA host's /24 for ReefDose devices.
+    """Scan the HA host's /24 for supported ReefBeat devices.
 
-    Returns {ip: device_info} for RSDOSE* devices. Uses modest concurrency + a
-    short timeout in a single pass — a heavy parallel sweep trips these devices'
-    rate-block, so manual IP entry stays the reliable fallback.
+    Returns {ip: device_info} for supported models (ReefDose, ReefATO+). Uses
+    modest concurrency + a short timeout in a single pass — a heavy parallel
+    sweep trips these devices' rate-block, so manual IP entry stays the
+    reliable fallback.
     """
     try:
         local_ip = await network.async_get_source_ip(hass, target_ip="8.8.8.8")
@@ -99,7 +101,7 @@ async def async_scan_dosers(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
     async def _scan_one(host: str) -> None:
         async with semaphore:
             info = await _probe_quiet(session, host, SCAN_TIMEOUT)
-        if info and str(info.get("hw_model") or "") in DOSER_HEADS:
+        if info and str(info.get("hw_model") or "") in SUPPORTED_MODELS:
             found[host] = info
 
     # return_exceptions so one bad host can never abort the whole scan.

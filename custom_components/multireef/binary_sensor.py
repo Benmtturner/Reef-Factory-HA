@@ -9,6 +9,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -16,6 +17,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import KhConfigEntry
 from .const import FAMILY_DP
 from .entity import KhEntity
+from .redsea.ato import RedSeaAtoCoordinator
+from .redsea.entity import RedSeaAtoEntity
 
 
 async def async_setup_entry(
@@ -25,6 +28,16 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensors for whichever device family this entry is."""
     coordinator = entry.runtime_data
+
+    if isinstance(coordinator, RedSeaAtoCoordinator):
+        async_add_entities(
+            [
+                RedSeaAtoLeakSensor(coordinator),
+                RedSeaAtoPumpSensor(coordinator),
+                RedSeaAtoProblemSensor(coordinator),
+            ]
+        )
+        return
 
     if coordinator.family == FAMILY_DP:
         async_add_entities([DpDosing(coordinator)])
@@ -205,3 +218,84 @@ class DpDosing(KhEntity, BinarySensorEntity):
         overwrote the level just set — so the card's Edit dialog uses this."""
         capacity = max(1.0, capacity)
         await self.coordinator.async_dp_set_container(min(level, capacity), capacity)
+
+
+# ---------------------------------------------------------------------------
+# Red Sea ReefATO+ binary sensors
+# ---------------------------------------------------------------------------
+
+
+class RedSeaAtoLeakSensor(RedSeaAtoEntity, BinarySensorEntity):
+    """On when the leak probe reads anything other than dry."""
+
+    _attr_name = "Leak"
+    _attr_device_class = BinarySensorDeviceClass.MOISTURE
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "leak")
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.data.leak_detected if self.coordinator.data else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data
+        if state is None:
+            return {}
+        return {"probe_connected": state.leak_connected, "status": state.leak_status}
+
+
+class RedSeaAtoPumpSensor(RedSeaAtoEntity, BinarySensorEntity):
+    """True while the top-off pump is running."""
+
+    _attr_name = "Pump"
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+    _attr_icon = "mdi:water-pump"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "pump")
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.data.is_pump_on if self.coordinator.data else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data
+        if state is None:
+            return {}
+        return {
+            "pump_state": state.pump_state,
+            "last_on_cause": state.last_pump_on_cause,
+        }
+
+
+class RedSeaAtoProblemSensor(RedSeaAtoEntity, BinarySensorEntity):
+    """On when the level sensor needs attention (error/disconnected/check)."""
+
+    _attr_name = "Sensor Problem"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "sensor_problem")
+
+    @property
+    def is_on(self) -> bool | None:
+        state = self.coordinator.data
+        if state is None:
+            return None
+        return state.ato_sensor_error or not state.ato_sensor_connected or state.check_sensor
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data
+        if state is None:
+            return {}
+        return {
+            "sensor_connected": state.ato_sensor_connected,
+            "sensor_error": state.ato_sensor_error,
+            "check_sensor": state.check_sensor,
+            "calibrated": state.is_calibrated,
+        }

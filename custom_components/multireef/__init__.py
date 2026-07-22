@@ -17,15 +17,18 @@ from .const import (
     DOMAIN,
     ECOTECH_PLATFORMS,
     ENTRY_TYPE_ECOTECH_BRIDGE,
+    ENTRY_TYPE_REDSEA_ATO,
     ENTRY_TYPE_REDSEA_DOSER,
     FAMILY_DP,
     PLATFORMS,
+    REDSEA_ATO_PLATFORMS,
     REDSEA_PLATFORMS,
 )
 from .coordinator import KhCoordinator
 from .ecotech.coordinator import EcoTechCoordinator
 from .ecotech.entity import bridge_device_info
 from .panel import async_register_multi_reef_panel
+from .redsea.ato import RedSeaAtoCoordinator
 from .redsea.coordinator import RedSeaDoserCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,6 +92,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.config_entries.async_forward_entry_setups(entry, REDSEA_PLATFORMS)
         return True
 
+    if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_REDSEA_ATO:
+        coordinator = RedSeaAtoCoordinator(hass, entry)
+        await coordinator.async_config_entry_first_refresh()
+        entry.runtime_data = coordinator
+        await hass.config_entries.async_forward_entry_setups(
+            entry, REDSEA_ATO_PLATFORMS
+        )
+        return True
+
     # Reef Factory device (the original path).
     coordinator = KhCoordinator(hass, entry)
     await coordinator.async_start()
@@ -106,6 +118,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         platforms = ECOTECH_PLATFORMS
     elif isinstance(coordinator, RedSeaDoserCoordinator):
         platforms = REDSEA_PLATFORMS
+    elif isinstance(coordinator, RedSeaAtoCoordinator):
+        platforms = REDSEA_ATO_PLATFORMS
     else:
         platforms = PLATFORMS
     unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
