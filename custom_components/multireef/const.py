@@ -11,6 +11,7 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.NUMBER,
     Platform.BUTTON,
+    Platform.SELECT,  # KH Keeper measurement interval
 ]
 
 # EcoTech bridge entries use a different platform set: selects for scene + wave

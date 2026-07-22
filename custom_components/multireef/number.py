@@ -52,7 +52,7 @@ async def async_setup_entry(
         return
     if coordinator.family != FAMILY_KH:
         return
-    async_add_entities([KhRemainingReagent(coordinator)])
+    async_add_entities([KhRemainingReagent(coordinator), KhCalibrationMeasured(coordinator)])
 
 
 class KhRemainingReagent(KhEntity, NumberEntity):
@@ -75,6 +75,36 @@ class KhRemainingReagent(KhEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_reagent(value)
+
+
+class KhCalibrationMeasured(KhEntity, NumberEntity):
+    """Measured calibration volume (mL) — setting it submits the calibration
+    for the last-started circuit (see the Calibrate <pump> buttons).
+
+    VERIFY the stored value in the RF app after your first calibration — the
+    command scale is inferred from the one live-verified encoder; if the app
+    shows it 100× high, report it so the scale can be corrected.
+    """
+
+    _attr_name = "Calibration Measured"
+    _attr_native_unit_of_measurement = UNIT_ML
+    _attr_native_min_value = 0
+    _attr_native_max_value = 500
+    _attr_native_step = 0.01
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:beaker-check"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "calibration_measured")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator._kh_cal_ml
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_kh_calibration_submit(value)
+        self.async_write_ha_state()
 
 
 class DpReservoirLevel(KhEntity, NumberEntity):

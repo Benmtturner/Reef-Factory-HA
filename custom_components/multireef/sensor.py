@@ -24,7 +24,7 @@ from .const import FAMILY_DP, UNIT_DKH, UNIT_ML
 from .ecotech.coordinator import EcoTechCoordinator
 from .ecotech.entity import EcoTechBridgeEntity, EcoTechDeviceEntity
 from .entity import KhEntity
-from .protocol import MEASUREMENT_STATES, DpState
+from .protocol import KH_CIRCUIT_INDEX_LABELS, MEASUREMENT_STATES, DpState
 from .redsea.api import HeadState
 from .redsea.coordinator import RedSeaDoserCoordinator
 from .redsea.entity import RedSeaDoserEntity, RedSeaHeadEntity
@@ -138,6 +138,12 @@ class KhPhSensor(KhEntity, SensorEntity):
     def native_value(self) -> float | None:
         return self.coordinator.data.ph if self.coordinator.data else None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data
+        # live_ph = the on-demand Measure-pH result (outside a full titration).
+        return {"live_ph": state.live_ph} if state and state.live_ph is not None else {}
+
 
 class KhLastMeasurementSensor(KhEntity, SensorEntity):
     """Timestamp of the most recent measurement."""
@@ -174,10 +180,16 @@ class KhMeasurementStatusSensor(KhEntity, SensorEntity):
         state = self.coordinator.data
         if state is None:
             return {}
-        return {
+        attrs: dict[str, Any] = {
             "progress": state.measurement_progress,
             "state_code": state.measurement_state,
         }
+        if state.cal_countdown is not None:
+            attrs["calibration_countdown"] = state.cal_countdown
+            attrs["calibration_circuit"] = KH_CIRCUIT_INDEX_LABELS.get(
+                state.cal_circuit, state.cal_circuit
+            )
+        return attrs
 
 
 class KhAlertThresholdSensor(KhEntity, SensorEntity):

@@ -50,12 +50,17 @@ from .const import (
     WS_SUBPROTOCOL,
 )
 from .protocol import (
+    KH_CIRCUITS,
     ZERO_SERIAL,
     DeviceConfig,
     DpState,
     KhState,
     build_frame,
     decode_config,
+    decode_kh_calibration,
+    decode_kh_ph,
+    encode_kh_calibration_value,
+    encode_kh_interval,
     decode_dp_container,
     decode_dp_dose,
     decode_dp_manual_refill,
@@ -209,6 +214,11 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
         self._retry = 0
         self._last_logged: dict[tuple[str, str], bytes] = {}
 
+        # KH calibration runtime state: which circuit the user last started, and
+        # the last submitted measured volume (shown by the Calibration number).
+        self._kh_cal_circuit: str | None = None
+        self._kh_cal_ml: float | None = None
+
         # Doser-only runtime state (not in the settings frame), carried across
         # settings refreshes and patched from status/dose frames.
         self._dp_dosing = False
@@ -283,6 +293,39 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
     async def async_cancel_measurement(self) -> None:
         """Cancel the measurement in progress."""
         await self.async_send("khMeasurement", "cancel")
+
+    async def async_kh_set_interval(self, code: int) -> None:
+        """Set the automatic measurement interval (selector code)."""
+        await self.async_send("khMeasurement", "setInterval", encode_kh_interval(code))
+        # Optimistic — the device pushes no settings frame for this; reflect now.
+        if isinstance(self.data, KhState):
+            self.async_set_updated_data(replace(self.data, interval_code=code))
+
+    async def async_kh_measure_ph(self) -> None:
+        """Read pH now (no reagent used — safe on-demand check)."""
+        await self.async_send("khCommand", "measurePh")
+
+    async def async_kh_calibration_start(self, circuit: str) -> None:
+        """Begin pump calibration for a circuit (aquarium / reagent_a / ro)."""
+        self._kh_cal_circuit = circuit
+        await self.async_send("khCommand", f"calibrationStart{KH_CIRCUITS[circuit]}")
+
+    async def async_kh_calibration_stop(self) -> None:
+        """End the running calibration (targets the last-started circuit)."""
+        circuit = self._kh_cal_circuit or "aquarium"
+        await self.async_send("khCommand", f"calibrationStop{KH_CIRCUITS[circuit]}")
+
+    async def async_kh_calibration_submit(self, ml: float) -> None:
+        """Store the measured calibration volume for the last-started circuit."""
+        circuit = self._kh_cal_circuit or "aquarium"
+        self._kh_cal_ml = ml
+        await self.async_send(
+            "khCommand", f"calibrationSet{KH_CIRCUITS[circuit]}", encode_kh_calibration_value(ml)
+        )
+
+    async def async_kh_calibration_reset(self) -> None:
+        """Reset pump calibration to factory."""
+        await self.async_send("khCommand", "calibrationReset")
 
     # -- Doser (RFDP) commands ------------------------------------------
     # Each carries an epoch-ms nonce (as the app does) and then asks for a
@@ -659,7 +702,24 @@ class KhCoordinator(DataUpdateCoordinator[KhState | DpState]):
                         measurement_progress=progress,
                     )
                 )
-        # pH/server/alert/calibration frames carry no entity data yet; ignored.
+        elif frame.command == "khRefresh" and frame.subcommand in ("calibration", "circuit"):
+            # Live calibration countdown for the circuit being calibrated.
+            if self.data is not None:
+                countdown, circuit = decode_kh_calibration(frame.payload)
+                self.async_set_updated_data(
+                    replace(self.data, cal_countdown=countdown, cal_circuit=circuit)
+                )
+        elif frame.command == "khRefresh" and frame.subcommand in ("calibrationStop", "circuitStop"):
+            if self.data is not None:
+                self.async_set_updated_data(
+                    replace(self.data, cal_countdown=None, cal_circuit=None)
+                )
+        elif frame.command == "khRefresh" and frame.subcommand == "pH":
+            # On-demand pH reading (measure-pH button).
+            ph = decode_kh_ph(frame.payload)
+            if ph is not None and self.data is not None:
+                self.async_set_updated_data(replace(self.data, live_ph=ph))
+        # server/alert frames carry no extra entity data; ignored.
 
     def _dp_container_hold(self, cur: float | None, cap: float | None) -> tuple:
         """While an optimistic container write is pending, return the just-set

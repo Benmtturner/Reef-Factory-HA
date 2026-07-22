@@ -77,10 +77,18 @@ class KhState:
     measurement_state: int  # offset 8 — 0/1/3/4, mirrors status frame
     measurement_progress: int  # offset 9 — percent
     history: tuple[KhMeasurement, ...]
+    # Live-patched fields (not in the settings frame; carried via replace()).
+    cal_countdown: int | None = None  # khRefresh/calibration countdown, None = idle
+    cal_circuit: int | None = None  # circuit index being calibrated
+    live_ph: float | None = None  # last khRefresh/pH push (measure-pH button)
 
     @property
     def measurement_status(self) -> str:
         return status_name(self.measurement_state)
+
+    @property
+    def interval_label(self) -> str:
+        return kh_interval_label(self.interval_code)
 
     @property
     def kh_out_of_range(self) -> bool | None:
@@ -225,6 +233,74 @@ def encode_reagent(ml: float) -> bytes:
     max_ml = 0xFFFFFFFF // SCALE
     value = max(0, min(max_ml, int(round(ml))))
     return (value * SCALE).to_bytes(4, "big")
+
+
+# --- KH measurement interval + calibration ----------------------------------
+
+# Interval selector (settings byte 10 / khMeasurement/setInterval code). Label
+# order from the SPA's option list; 0 = 1 h confirmed live (hourly history
+# timestamps). Byte↔label pairing beyond 0 is provisional — cross-check the RF
+# app when changing it.
+KH_INTERVALS: dict[int, str] = {
+    0: "1 h",
+    1: "2 h",
+    2: "4 h",
+    3: "6 h",
+    4: "8 h",
+    5: "12 h",
+    6: "Off",
+}
+KH_INTERVAL_CUSTOM = 7  # takes an extra 3-byte time payload — not offered yet
+
+
+def kh_interval_label(code: int) -> str:
+    if code == KH_INTERVAL_CUSTOM:
+        return "Custom"
+    return KH_INTERVALS.get(code, f"Code {code}")
+
+
+# The three fluid circuits and their command suffixes: Aquarium (sample),
+# A (reagent/titrant), Ro (rinse).
+KH_CIRCUITS: dict[str, str] = {"aquarium": "Aquarium", "reagent_a": "A", "ro": "Ro"}
+KH_CIRCUIT_LABELS: dict[str, str] = {
+    "aquarium": "Aquarium pump",
+    "reagent_a": "Reagent pump",
+    "ro": "RO pump",
+}
+# khRefresh/calibration byte 1 → circuit index.
+KH_CIRCUIT_INDEX_LABELS: dict[int, str] = {0: "Aquarium pump", 1: "Reagent pump", 2: "RO pump"}
+
+
+def encode_kh_interval(code: int) -> bytes:
+    """khMeasurement/setInterval payload: a single selector byte."""
+    return bytes([code & 0xFF])
+
+
+def encode_kh_calibration_value(ml: float) -> bytes:
+    """khCommand/calibrationSet<circuit> payload: big-endian u32 of ml × SCALE.
+
+    Scale note: the SPA hinted commands use ×100, but the only live-verified
+    command encoder (khSet/reagent) is ×SCALE(10000) — follow the verified one.
+    VERIFY the stored value in the RF app after the first calibration; if it
+    reads 100× high there, drop this to ×100.
+    """
+    max_ml = 0xFFFFFFFF // SCALE
+    value = max(0.0, min(float(max_ml), float(ml)))
+    return int(round(value * SCALE)).to_bytes(4, "big")
+
+
+def decode_kh_calibration(payload: bytes) -> tuple[int, int]:
+    """khRefresh/calibration | /circuit frame → (countdown, circuit index)."""
+    countdown = payload[0] if payload else 0
+    circuit = payload[1] if len(payload) > 1 else 0
+    return countdown, circuit
+
+
+def decode_kh_ph(payload: bytes) -> float | None:
+    """khRefresh/pH frame → pH (u32 big-endian ÷ SCALE), None if malformed."""
+    if len(payload) < 4:
+        return None
+    return round(int.from_bytes(payload[:4], "big") / SCALE, 2)
 
 
 # ---------------------------------------------------------------------------

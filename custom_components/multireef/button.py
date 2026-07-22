@@ -12,6 +12,7 @@ from .const import FAMILY_DP, FAMILY_KH
 from .ecotech.coordinator import EcoTechCoordinator
 from .ecotech.entity import EcoTechBridgeEntity
 from .entity import KhEntity
+from .protocol import KH_CIRCUIT_LABELS
 from .redsea.coordinator import RedSeaDoserCoordinator
 from .redsea.entity import RedSeaDoserEntity, RedSeaHeadEntity
 
@@ -49,6 +50,12 @@ async def async_setup_entry(
         [
             KhMeasureNowButton(coordinator),
             KhCancelButton(coordinator),
+            KhMeasurePhButton(coordinator),
+            KhCalStartButton(coordinator, "aquarium"),
+            KhCalStartButton(coordinator, "reagent_a"),
+            KhCalStartButton(coordinator, "ro"),
+            KhCalStopButton(coordinator),
+            KhCalResetButton(coordinator),
         ]
     )
 
@@ -77,6 +84,67 @@ class KhCancelButton(KhEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         await self.coordinator.async_cancel_measurement()
+
+
+class KhMeasurePhButton(KhEntity, ButtonEntity):
+    """Read pH now — no reagent used, safe any time. Result lands as the pH
+    sensor's live_ph attribute."""
+
+    _attr_name = "Measure pH"
+    _attr_icon = "mdi:ph"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "measure_ph")
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_kh_measure_ph()
+
+
+class KhCalStartButton(KhEntity, ButtonEntity):
+    """Start calibrating one fluid circuit's pump.
+
+    Flow (mirrors the RF app): start → the pump runs and the device counts
+    down → measure what it dispensed → enter it in Calibration Measured.
+    """
+
+    _attr_icon = "mdi:progress-wrench"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, circuit: str) -> None:
+        super().__init__(coordinator, f"cal_start_{circuit}")
+        self._circuit = circuit
+        self._attr_name = f"Calibrate {KH_CIRCUIT_LABELS[circuit]}"
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_kh_calibration_start(self._circuit)
+
+
+class KhCalStopButton(KhEntity, ButtonEntity):
+    """Stop the running calibration (the last circuit started)."""
+
+    _attr_name = "Stop Calibration"
+    _attr_icon = "mdi:stop-circle-outline"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "cal_stop")
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_kh_calibration_stop()
+
+
+class KhCalResetButton(KhEntity, ButtonEntity):
+    """Reset pump calibration to factory values."""
+
+    _attr_name = "Reset Calibration"
+    _attr_icon = "mdi:backup-restore"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "cal_reset")
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_kh_calibration_reset()
 
 
 class DpStopRefillButton(KhEntity, ButtonEntity):
