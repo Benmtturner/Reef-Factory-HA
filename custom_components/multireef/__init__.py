@@ -96,6 +96,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = RedSeaAtoCoordinator(hass, entry)
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
+        await _serve_card(hass, "tank-temp-controller-card.js")
         await hass.config_entries.async_forward_entry_setups(
             entry, REDSEA_ATO_PLATFORMS
         )
