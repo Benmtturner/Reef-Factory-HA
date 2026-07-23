@@ -212,10 +212,12 @@ class TankTempControllerCard extends HTMLElement {
 
   getCardSize() { return 3; }
 }
-customElements.define("tank-temp-controller-card", TankTempControllerCard);
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "tank-temp-controller-card",
-  name: "Tank Temp Controller Card",
-  description: "D-D style aquarium heating/cooling controller display",
-});
+if (!customElements.get("tank-temp-controller-card")) {
+  customElements.define("tank-temp-controller-card", TankTempControllerCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "tank-temp-controller-card",
+    name: "Tank Temp Controller Card",
+    description: "D-D style aquarium heating/cooling controller display",
+  });
+}
