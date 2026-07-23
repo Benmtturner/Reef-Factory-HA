@@ -20,6 +20,7 @@ class TankTempControllerCard extends HTMLElement {
       setpoint_entity: "input_number.3k_tank_setpoint",
       variance_entity: "input_number.3k_tank_variance",
       alarm_band_entity: "input_number.3k_tank_alarm_band",
+      cooling_range_entity: "input_number.3k_tank_cooling_range",
       enable_entity: "input_boolean.3k_tank_controller_enabled",
       ...config,
     };
@@ -145,9 +146,9 @@ class TankTempControllerCard extends HTMLElement {
     if (!el("temp")) return;
     el("temp").textContent = t === null ? "--.-" : t.toFixed(1);
     const sp = this._num(c.setpoint_entity, 25), va = this._num(c.variance_entity, 0.3),
-          ab = this._num(c.alarm_band_entity, 1);
+          ab = this._num(c.alarm_band_entity, 1), cr = this._num(c.cooling_range_entity, 1);
     el("setline").textContent =
-      `SET ${sp.toFixed(1)} · ±${va.toFixed(1)} · ALM ±${ab.toFixed(1)}`;
+      `SET ${sp.toFixed(1)} · ±${va.toFixed(1)} · COOL +${cr.toFixed(1)} · ALM ±${ab.toFixed(1)}`;
     el("ico-cool").classList.toggle("on-cool", this._st(c.cool_entity) === "on");
     el("ico-heat").classList.toggle("on-heat", this._st(c.heat_entity) === "on");
     el("ico-alarm").classList.toggle("on-alarm", this._st(c.alarm_entity) === "on");
@@ -166,6 +167,7 @@ class TankTempControllerCard extends HTMLElement {
     const rows = [
       ["Setpoint", c.setpoint_entity, 0.1, 18, 32],
       ["Variance ±", c.variance_entity, 0.1, 0.1, 3],
+      ["Cooling range +", c.cooling_range_entity, 0.1, 0.3, 5],
       ["Alarm band ±", c.alarm_band_entity, 0.1, 0.2, 5],
     ];
     panel.innerHTML = `
