@@ -62,9 +62,44 @@ async def _serve_card(hass: HomeAssistant, filename: str) -> None:
             [StaticPathConfig(url, str(card_path), False)]
         )
         add_extra_js_url(hass, f"{url}?v={version}")
+        # extra_js loads fire-and-forget, so a cold (hard-refresh) page can
+        # render the dashboard before the module arrives. Lovelace *resources*
+        # are awaited before first render, so register one of those too; the
+        # cards' define-guards make the double load a no-op.
+        await _ensure_lovelace_resource(hass, f"{url}?v={version}")
         _LOGGER.debug("Multi Reef card registered at %s", url)
     except Exception:  # noqa: BLE001 — a card failure must never break the device
         _LOGGER.warning("Could not register card %s", filename, exc_info=True)
+
+
+async def _ensure_lovelace_resource(hass: HomeAssistant, versioned_url: str) -> None:
+    """Create or update the storage-mode Lovelace resource for a card URL.
+
+    YAML-mode Lovelace has no resource storage; in that case (or on any
+    surprise) we leave the extra_js registration to do its best.
+    """
+    try:
+        lovelace = hass.data.get("lovelace")
+        resources = getattr(lovelace, "resources", None)
+        if resources is None:
+            return
+        if not resources.loaded:
+            await resources.async_load()
+        base = versioned_url.split("?")[0]
+        for item in resources.async_items():
+            if (item.get("url") or "").split("?")[0] == base:
+                if item.get("url") != versioned_url:
+                    await resources.async_update_item(
+                        item["id"], {"url": versioned_url}
+                    )
+                return
+        await resources.async_create_item(
+            {"res_type": "module", "url": versioned_url}
+        )
+    except Exception:  # noqa: BLE001 — never let resource bookkeeping break setup
+        _LOGGER.debug(
+            "Could not register Lovelace resource %s", versioned_url, exc_info=True
+        )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
