@@ -19,7 +19,6 @@ from .const import (
     ENTRY_TYPE_ECOTECH_BRIDGE,
     ENTRY_TYPE_REDSEA_ATO,
     ENTRY_TYPE_REDSEA_DOSER,
-    FAMILY_DP,
     PLATFORMS,
     REDSEA_ATO_PLATFORMS,
     REDSEA_PLATFORMS,
@@ -40,36 +39,61 @@ type KhConfigEntry = ConfigEntry[KhCoordinator]
 CARD_VERSION = "0.18.0"
 
 
-async def _serve_card(hass: HomeAssistant, filename: str) -> None:
-    """Serve a bundled Lovelace card and auto-load it into the frontend (once).
+# All cards ship as ONE module. Separately-registered modules proved
+# unreliable on cold loads: Chrome can fetch a later extra module (200) and
+# still never evaluate it after a hard refresh, while the first-position
+# module evaluates every time. One file, one evaluation, every card defined
+# (each card is define-guarded, so absent devices cost nothing).
+_CARD_FILES = (
+    "reef-dose-card.js",
+    "reef-factory-doser-card.js",
+    "tank-temp-controller-card.js",
+)
+_CARDS_BUNDLE = "multireef-cards.js"
 
-    Cache-busts on the integration version so a HACS update reloads it in the
-    browser without a manual hard-refresh.
+
+async def _serve_cards(hass: HomeAssistant) -> None:
+    """Bundle and serve every Lovelace card, auto-loaded into the frontend (once).
+
+    Cache-busts on the integration version so a HACS update reloads the cards
+    in the browser without a manual hard-refresh.
     """
-    key = f"{DOMAIN}_card_{filename}"
+    key = f"{DOMAIN}_cards_bundle"
     if hass.data.get(key):
         return
     hass.data[key] = True
-    url = f"/{DOMAIN}/{filename}"
-    card_path = Path(__file__).parent / "frontend" / filename
+    frontend_dir = Path(__file__).parent / "frontend"
+    bundle_path = frontend_dir / _CARDS_BUNDLE
+
+    def _build_bundle() -> None:
+        parts = [
+            (frontend_dir / name).read_text(encoding="utf-8")
+            for name in _CARD_FILES
+        ]
+        bundle_path.write_text("\n;\n".join(parts), encoding="utf-8")
+
     try:
         integration = await async_get_integration(hass, DOMAIN)
         version = str(integration.version) if integration.version else CARD_VERSION
     except Exception:  # noqa: BLE001
         version = CARD_VERSION
     try:
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(url, str(card_path), False)]
-        )
+        await hass.async_add_executor_job(_build_bundle)
+        url = f"/{DOMAIN}/{_CARDS_BUNDLE}"
+        # Keep the individual files reachable too (debugging, direct links).
+        paths = [StaticPathConfig(url, str(bundle_path), False)]
+        paths += [
+            StaticPathConfig(
+                f"/{DOMAIN}/{name}", str(frontend_dir / name), False
+            )
+            for name in _CARD_FILES
+        ]
+        await hass.http.async_register_static_paths(paths)
         add_extra_js_url(hass, f"{url}?v={version}")
-        # extra_js loads fire-and-forget, so a cold (hard-refresh) page can
-        # render the dashboard before the module arrives. Lovelace *resources*
-        # are awaited before first render, so register one of those too; the
-        # cards' define-guards make the double load a no-op.
         await _ensure_lovelace_resource(hass, f"{url}?v={version}")
-        _LOGGER.debug("Multi Reef card registered at %s", url)
+        _LOGGER.debug("Multi Reef cards bundle registered at %s", url)
     except Exception:  # noqa: BLE001 — a card failure must never break the device
-        _LOGGER.warning("Could not register card %s", filename, exc_info=True)
+        _LOGGER.warning("Could not register cards bundle", exc_info=True)
 
 
 async def _ensure_lovelace_resource(hass: HomeAssistant, versioned_url: str) -> None:
@@ -86,6 +110,11 @@ async def _ensure_lovelace_resource(hass: HomeAssistant, versioned_url: str) -> 
         if not resources.loaded:
             await resources.async_load()
         base = versioned_url.split("?")[0]
+        # Prune resources from the pre-bundle era so cards load exactly once.
+        for item in list(resources.async_items()):
+            item_url = item.get("url") or ""
+            if item_url.startswith(f"/{DOMAIN}/") and item_url.split("?")[0] != base:
+                await resources.async_delete_item(item["id"])
         for item in resources.async_items():
             if (item.get("url") or "").split("?")[0] == base:
                 if item.get("url") != versioned_url:
@@ -106,6 +135,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a Multi Reef entry — a Reef Factory device or an EcoTech bridge."""
     # The Multi Reef console is available whenever the integration is set up.
     await async_register_multi_reef_panel(hass)
+    await _serve_cards(hass)
 
     if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_ECOTECH_BRIDGE:
         coordinator = EcoTechCoordinator(hass, entry)
@@ -123,7 +153,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = RedSeaDoserCoordinator(hass, entry)
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
-        await _serve_card(hass, "reef-dose-card.js")
         await hass.config_entries.async_forward_entry_setups(entry, REDSEA_PLATFORMS)
         return True
 
@@ -131,7 +160,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = RedSeaAtoCoordinator(hass, entry)
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
-        await _serve_card(hass, "tank-temp-controller-card.js")
         await hass.config_entries.async_forward_entry_setups(
             entry, REDSEA_ATO_PLATFORMS
         )
@@ -141,8 +169,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = KhCoordinator(hass, entry)
     await coordinator.async_start()
     entry.runtime_data = coordinator
-    if coordinator.family == FAMILY_DP:
-        await _serve_card(hass, "reef-factory-doser-card.js")
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

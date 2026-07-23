@@ -21,3 +21,4 @@ custom_components/*
 custom_components/**/__pycache__/
 *.py[cod]
 .DS_Store
+multireef-cards.js
